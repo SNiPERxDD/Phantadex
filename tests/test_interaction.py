@@ -26,7 +26,12 @@ class _Probe:
 
 
 class _ViewportPage(FakePage):
-    def evaluate(self, _script, *_args):
+    def evaluate(self, script, *_args):
+        # Dispatch on the script: returning the viewport pair for every
+        # evaluation made the mute pass look as though it had silenced two
+        # elements, and its log line then consumed the patched clock.
+        if "querySelectorAll('audio, video')" in script:
+            return 0
         return [1200, 800]
 
 
@@ -225,3 +230,24 @@ class ReadingSessionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SilenceMediaTests(unittest.TestCase):
+    """Covers the mute applied to autoplaying readings and narration players."""
+
+    def test_audible_elements_are_reported(self):
+        page = FakePage(evaluate_result=2)
+        self.assertEqual(interaction.silence_media(page), 2)
+
+    def test_a_silent_page_reports_nothing(self):
+        page = FakePage(evaluate_result=0)
+        self.assertEqual(interaction.silence_media(page), 0)
+
+    def test_an_evaluation_failure_is_not_fatal(self):
+        page = FakePage(evaluate_error=RuntimeError("execution context destroyed"))
+        self.assertEqual(interaction.silence_media(page), 0)
+
+    def test_the_script_targets_audio_as_well_as_video(self):
+        self.assertIn("audio", interaction._SILENCE_JS)
+        self.assertIn("video", interaction._SILENCE_JS)
+        self.assertIn("volume = 0", interaction._SILENCE_JS)

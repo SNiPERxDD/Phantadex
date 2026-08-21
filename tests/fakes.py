@@ -125,11 +125,19 @@ class FakePage:
     """A page that resolves selectors from a dict of ``selector -> FakeLocator``."""
 
     def __init__(
-        self, url="/learn/course/lecture/abc/item", title="Item | Coursera", locators=None
+        self,
+        url="/learn/course/lecture/abc/item",
+        title="Item | Coursera",
+        locators=None,
+        evaluate_result=None,
+        evaluate_error=None,
     ):
         self._url = url
         self._title = title
         self.locators = locators or {}
+        self.evaluate_result = evaluate_result
+        self.evaluate_error = evaluate_error
+        self.evaluated = []
         self.goto_calls = []
         self.reloaded = 0
         self.pointer_events = []
@@ -160,8 +168,11 @@ class FakePage:
     def reload(self):
         self.reloaded += 1
 
-    def evaluate(self, _script, *_args):
-        return None
+    def evaluate(self, script, *_args):
+        self.evaluated.append(script)
+        if self.evaluate_error is not None:
+            raise self.evaluate_error
+        return self.evaluate_result
 
     def is_closed(self):
         return False

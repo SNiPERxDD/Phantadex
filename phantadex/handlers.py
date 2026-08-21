@@ -219,6 +219,7 @@ class ReadingHandler(BaseHandler):
     def handle(self, page, ctx):
         ctx.announce("reading", "reading")
         start_url = page.url
+        interaction.silence_media(page)
         text = page_ops.extract_reading(page)
         if not text:
             raise RuntimeError("Reading content was not found")
@@ -302,6 +303,7 @@ class PluginHandler(BaseHandler):
     def handle(self, page, ctx):
         ctx.announce("plugin", "external resource / ungraded plugin")
         start_url = page.url
+        interaction.silence_media(page)
 
         if schema.first_visible(page, "navigation", "mark_complete") is not None:
             logs.step("resource has a completion control; dwelling briefly")
@@ -336,6 +338,7 @@ class DiscussionHandler(BaseHandler):
     def handle(self, page, ctx):
         ctx.announce("discussion", "discussion prompt")
         start_url = page.url
+        interaction.silence_media(page)
         self.archive(page, ctx, page_ops.extract_reading(page))
         return self.advance(page, ctx, start_url)
 

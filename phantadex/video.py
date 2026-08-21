@@ -83,6 +83,7 @@ def mute_and_play(page):
     """Mutes the player and starts playback."""
     try:
         page.evaluate(_MUTE_JS)
+        interaction.silence_media(page)
 
         # Only click an explicit "Mute" control -- clicking "Unmute" would undo it.
         mute_button = schema.first_visible(page, "video_controls", "mute_button")

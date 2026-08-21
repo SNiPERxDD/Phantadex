@@ -219,6 +219,42 @@ def _next_delta(metrics):
     return random.randint(100, 400)
 
 
+# ------------------------------------------------------------------ audio
+
+_SILENCE_JS = """
+() => {
+    const media = Array.from(document.querySelectorAll('audio, video'));
+    let silenced = 0;
+    for (const element of media) {
+        if (element.muted && element.volume === 0) continue;
+        element.muted = true;
+        element.volume = 0;
+        silenced += 1;
+    }
+    return silenced;
+}
+"""
+
+
+def silence_media(page):
+    """Mutes every audio and video element on the page.
+
+    Returns the number of elements that were still audible. Some readings embed
+    a narration player that autoplays unmuted, which the video-only mute path
+    never reached: it queries ``video`` alone, and a reading has no player for
+    the handler to mute in the first place. Elements already silent are left
+    untouched so a repeated call reports nothing.
+    """
+    try:
+        silenced = page.evaluate(_SILENCE_JS)
+    except Exception as exc:
+        log.debug("Silencing media failed: %s", exc)
+        return 0
+    if silenced:
+        logs.step(f"muted {silenced} autoplaying media element(s)")
+    return silenced
+
+
 # ---------------------------------------------------------- reading session
 
 
@@ -248,6 +284,9 @@ def reading_session(page, metadata_wait_min):
 
             # Clear modals before scrolling so wheel events reach the content.
             modals.dismiss_all(page)
+            # Re-checked every pass: a narration player can be lazily inserted
+            # part-way through the dwell, after the entry mute has run.
+            silence_media(page)
             if not urls.same_item(page.url, start_url):
                 logs.bar_done()
                 logs.nav("page changed; ending reading session")
