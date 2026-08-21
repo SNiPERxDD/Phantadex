@@ -42,7 +42,9 @@ Product vocabulary:
     *   **Discussion:** Archives the prompt and advances. No reply is composed
         or submitted.
     *   **Plugins / LTI:** Detected and stepped over.
-    *   **Graded work:** Detected and handed back to you (see §8).
+    *   **Graded work:** Detected, named in the log and stepped past, so one
+        graded item cannot stall the whole run. `--pause-on-graded` waits for
+        you instead (see §8).
 6.  **Pointer Consistency:** Automated controls share one interaction path that
     moves through several cursor steps, hovers, pauses for a randomized reaction
     interval, and then clicks.
@@ -261,6 +263,9 @@ source. Both entry points share the connection flags:
     variation comes from `--video-skip-range`, which is randomized by design.
 *   `--reading-minutes MIN[-MAX]` — fallback reading dwell in whole minutes,
     either fixed (`5`) or randomized (`7-12`, the default).
+*   `--pause-on-graded` — stop on a graded quiz or peer assignment and wait for
+    you to complete it. Without the flag the run names the item and moves to the
+    next one; nothing is ever answered or submitted either way.
 
 `pdex skip` accepts `--video-skip-range` and uses the same random range parser
 as Watch. `pdex archive` adds `--force` to re-scrape already-archived items.
@@ -334,8 +339,9 @@ python run_tests.py --live   # additionally probe a running Chrome session
 
 ## 8. Known Limitations & Constraints
 
-*   **Graded Instruments:** The runner pauses on graded quizzes and assignments
-    until the user completes or leaves the item; it never submits them.
+*   **Graded Instruments:** Never answered and never submitted. By default the
+    runner logs the item and advances to the next one. With `--pause-on-graded`
+    it waits until the user completes or leaves the item.
 *   **Discussion Prompts:** The prompt is archived; no reply is composed or
     submitted.
 *   **Source Site Updates:** The script relies on CSS selectors. If Coursera

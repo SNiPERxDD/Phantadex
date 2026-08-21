@@ -45,8 +45,11 @@ class Runner:
         self.last_url = None
         self.stuck_ticks = 0
         self.handler_failures = {}
+        self.unhandled_ticks = {}
 
     HANDLER_FAILURE_LIMIT = 3
+    # Passes an unclassified page is given before the run steps past it.
+    UNHANDLED_WAIT_LIMIT = 3
 
     def run(self):
         """Connects and loops until the course ends or the user interrupts."""
@@ -102,9 +105,7 @@ class Runner:
 
         handler = handlers.for_page_type(page_type)
         if handler is None:
-            log.debug("No handler for page type %s; idling", page_type)
-            time.sleep(self.settings.idle_poll_seconds)
-            return handlers.CONTINUE
+            return self._step_past_unhandled(page, page_type)
 
         outcome = self._skip_completed(page, page_type)
         if outcome == "SKIPPED":
@@ -133,6 +134,33 @@ class Runner:
                 return self._advance_failed_item(page, item_key)
             time.sleep(2)
             return handlers.CONTINUE
+
+    def _step_past_unhandled(self, page, page_type):
+        """Waits out a page no handler claims, then advances rather than idling.
+
+        A page reads as ``UNKNOWN`` while it is still rendering, so the first
+        passes only wait. Past that the type is genuinely unhandled -- ``LAB``
+        has no handler registered at all -- and the previous behaviour idled on
+        it forever, stalling the entire traversal on one item.
+        """
+        item_key = urls.normalize_path(page.url)
+        waited = self.unhandled_ticks.get(item_key, 0) + 1
+        self.unhandled_ticks[item_key] = waited
+
+        if waited < self.UNHANDLED_WAIT_LIMIT:
+            log.debug(
+                "No handler for page type %s; waiting (%d/%d)",
+                page_type,
+                waited,
+                self.UNHANDLED_WAIT_LIMIT,
+            )
+            time.sleep(self.settings.idle_poll_seconds)
+            return handlers.CONTINUE
+
+        logs.warn(f"no handler for {page_type}; advancing")
+        if navigation.advance(page, self.ctx.manager, start_url=page.url) == "COURSE_COMPLETE":
+            return handlers.COURSE_COMPLETE
+        return handlers.CONTINUE
 
     def _record_failure(self, page, exc):
         """Marks the item as failed in the ledger so the skip is not silent."""

@@ -77,7 +77,16 @@ class HandlerBehaviourTests(unittest.TestCase):
         mark.assert_not_called()
         self.advance.assert_called_once()
 
-    def test_assignment_is_never_submitted(self):
+    def test_assignment_advances_without_submitting_anything(self):
+        with mock.patch.object(handlers.navigation, "mark_complete") as mark:
+            result = handlers.AssignmentHandler().handle(self.page, self.ctx)
+        mark.assert_not_called()
+        self.assertEqual(self.ctx.manager.saved, [])
+        self.advance.assert_called_once()
+        self.assertEqual(result, handlers.CONTINUE)
+
+    def test_assignment_waits_when_the_pause_is_requested(self):
+        self.ctx.settings = config.Settings(pause_on_graded=True)
         with (
             mock.patch.object(handlers.navigation, "mark_complete") as mark,
             mock.patch.object(handlers.urls, "same_item", side_effect=[True, False]),
@@ -88,6 +97,26 @@ class HandlerBehaviourTests(unittest.TestCase):
         self.assertEqual(self.ctx.manager.saved, [])
         self.advance.assert_not_called()
         sleep.assert_called_once_with(2)
+        self.assertEqual(result, handlers.CONTINUE)
+
+    def test_a_graded_quiz_advances_without_being_answered(self):
+        with mock.patch.object(handlers.detection, "is_graded", return_value=True):
+            result = handlers.QuizHandler().handle(self.page, self.ctx)
+        self.assertEqual(self.ctx.manager.saved, [])
+        self.advance.assert_called_once()
+        self.assertEqual(result, handlers.CONTINUE)
+
+    def test_a_graded_quiz_waits_when_the_pause_is_requested(self):
+        self.ctx.settings = config.Settings(pause_on_graded=True)
+        with (
+            mock.patch.object(handlers.detection, "is_graded", return_value=True),
+            mock.patch.object(handlers.QuizHandler, "_quiz_present", return_value=False),
+            mock.patch.object(handlers, "_notify"),
+            mock.patch.object(handlers.time, "sleep"),
+        ):
+            result = handlers.QuizHandler().handle(self.page, self.ctx)
+        self.assertEqual(self.ctx.manager.saved, [])
+        self.advance.assert_called_once()
         self.assertEqual(result, handlers.CONTINUE)
 
     def test_discussion_archives_the_prompt(self):

@@ -251,7 +251,11 @@ class QuizHandler(BaseHandler):
 
     def handle(self, page, ctx):
         if detection.is_graded(page):
-            return self._await_human(page, ctx)
+            if ctx.settings.pause_on_graded:
+                return self._await_human(page, ctx)
+            ctx.announce("quiz_graded", "graded quiz -- not auto-answered")
+            logs.step("advancing past it; --pause-on-graded waits for you instead")
+            return self.advance(page, ctx, page.url)
 
         ctx.announce("quiz_skip", "ungraded quiz (practice/orientation)")
         logs.step("stepping past without answering")
@@ -322,8 +326,12 @@ class AssignmentHandler(PluginHandler):
 
     def handle(self, page, ctx):
         ctx.announce("assignment", "peer or honors assignment")
-        logs.step("paused -- complete or leave this item; Watch resumes after navigation")
         start_url = page.url
+        if not ctx.settings.pause_on_graded:
+            logs.step("advancing past it; --pause-on-graded waits for you instead")
+            return self.advance(page, ctx, start_url)
+
+        logs.step("paused -- complete or leave this item; Watch resumes after navigation")
         while urls.same_item(page.url, start_url):
             time.sleep(2)
         return CONTINUE

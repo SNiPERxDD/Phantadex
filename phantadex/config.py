@@ -27,6 +27,10 @@ class Settings:
     # Reading dwell when the page declares no duration.
     reading_default_minutes: tuple = DEFAULT_READING_MINUTES
 
+    # Graded items are stepped past by default. The run used to block on them
+    # indefinitely, which stalled the whole traversal on a single item.
+    pause_on_graded: bool = False
+
     # Main-loop pacing.
     idle_poll_seconds: float = 2.0
     settle_seconds: float = 5.0
@@ -38,9 +42,10 @@ class Settings:
         """Returns a short human-readable summary of the active settings."""
         seek = self.video_skip_range or "disabled"
         reading = "-".join(str(value) for value in self.reading_default_minutes)
+        graded = "pause" if self.pause_on_graded else "skip"
         return (
             f"threshold={self.video_completion_threshold}% seek={seek} reading={reading}m "
-            f"log={self.log_level}"
+            f"graded={graded} log={self.log_level}"
         )
 
 
@@ -111,6 +116,14 @@ def add_automation_args(parser):
         help="Disable the pre-watch seek entirely and play videos through.",
     )
     parser.add_argument(
+        "--pause-on-graded",
+        action="store_true",
+        help=(
+            "Stop on a graded quiz or assignment and wait for you to finish it. "
+            "Without this the run logs the item and moves to the next one."
+        ),
+    )
+    parser.add_argument(
         "--video-threshold",
         type=parse_video_threshold,
         default=100.0,
@@ -168,4 +181,5 @@ def settings_from_args(args):
             else (getattr(args, "video_skip_range", DEFAULT_VIDEO_SKIP_RANGE) or "").strip()
         ),
         reading_default_minutes=getattr(args, "reading_minutes", DEFAULT_READING_MINUTES),
+        pause_on_graded=getattr(args, "pause_on_graded", False),
     )

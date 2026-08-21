@@ -115,3 +115,51 @@ class ArchiveBeforeSkipTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UnhandledPageTypeTests(unittest.TestCase):
+    """A type with no handler must not hold the traversal forever."""
+
+    def setUp(self):
+        self.watch = runner.Runner(config.Settings())
+        self.page = FakePage(url="https://www.coursera.org/learn/c/ungradedLab/abc/lab")
+
+    def test_the_first_passes_only_wait(self):
+        with (
+            mock.patch.object(runner.navigation, "advance") as advance,
+            mock.patch.object(runner.time, "sleep") as sleep,
+        ):
+            for _ in range(runner.Runner.UNHANDLED_WAIT_LIMIT - 1):
+                outcome = self.watch._step_past_unhandled(self.page, detection.LAB)
+        self.assertEqual(outcome, runner.handlers.CONTINUE)
+        advance.assert_not_called()
+        self.assertEqual(sleep.call_count, runner.Runner.UNHANDLED_WAIT_LIMIT - 1)
+
+    def test_the_item_is_stepped_past_once_the_wait_is_spent(self):
+        with (
+            mock.patch.object(runner.navigation, "advance", return_value="NAVIGATED") as advance,
+            mock.patch.object(runner.time, "sleep"),
+        ):
+            for _ in range(runner.Runner.UNHANDLED_WAIT_LIMIT):
+                outcome = self.watch._step_past_unhandled(self.page, detection.LAB)
+        advance.assert_called_once()
+        self.assertEqual(outcome, runner.handlers.CONTINUE)
+
+    def test_a_finished_course_is_reported_rather_than_looped(self):
+        with (
+            mock.patch.object(runner.navigation, "advance", return_value="COURSE_COMPLETE"),
+            mock.patch.object(runner.time, "sleep"),
+        ):
+            for _ in range(runner.Runner.UNHANDLED_WAIT_LIMIT):
+                outcome = self.watch._step_past_unhandled(self.page, detection.LAB)
+        self.assertEqual(outcome, runner.handlers.COURSE_COMPLETE)
+
+    def test_each_item_gets_its_own_wait_budget(self):
+        other = FakePage(url="https://www.coursera.org/learn/c/ungradedLab/xyz/lab2")
+        with (
+            mock.patch.object(runner.navigation, "advance") as advance,
+            mock.patch.object(runner.time, "sleep"),
+        ):
+            self.watch._step_past_unhandled(self.page, detection.LAB)
+            self.watch._step_past_unhandled(other, detection.LAB)
+        advance.assert_not_called()
