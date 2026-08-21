@@ -25,7 +25,7 @@ class FakeBrowserSession:
     def __exit__(self, _exc_type, _exc, _traceback):
         return False
 
-    def find_course_page(self):
+    def find_course_page(self, course_url=""):
         return self.page
 
     @staticmethod

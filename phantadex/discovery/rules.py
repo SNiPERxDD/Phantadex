@@ -101,17 +101,42 @@ SUBTEXT_TYPES = (
 FILLER_OVERRIDES = ("survey", "how was the course")
 
 
+# Screen-reader prefixes Coursera puts ahead of the type in a row's aria-label.
+LABEL_PREFIXES = ("selected link", "link")
+
+
+def _label_type(label):
+    """Returns the type field of a sidebar row's ``aria-label``.
+
+    The label reads "<type>, <title>, <status>, <duration>", sometimes behind a
+    screen-reader prefix. Only the first field names the type; the title after
+    it routinely contains words that name a different one.
+    """
+    for field in (label or "").split(","):
+        candidate = field.strip().lower()
+        if candidate and candidate not in LABEL_PREFIXES:
+            return candidate
+    return ""
+
+
 def classify_sidebar_row(subtext, label, href):
     """Classifies one sidebar row from its subtext, aria-label, then URL.
 
-    The visible subtext is consulted first because it distinguishes graded from
-    ungraded variants that share a URL path segment; the segment is the
-    unlocalized fallback when the row has not finished rendering.
+    Each source is matched on its own. The subtext is consulted first because
+    it names the type by itself ("Reading", "Honors Peer-graded Assignment")
+    and distinguishes graded from ungraded variants sharing a URL segment; the
+    aria-label's type field covers a row whose subtext has not rendered; the
+    segment is the unlocalized last resort.
+
+    The two text sources used to be concatenated into one haystack. Because the
+    aria-label carries the item's title, a reading titled "... for Module 4
+    Peer Assessment" matched "peer" and was mapped ``PEER_REVIEW`` -- named in
+    the course map as work to submit, when it is a page to read.
     """
-    haystack = f"{subtext} {label}".lower()
-    for needle, item_type in SUBTEXT_TYPES:
-        if needle in haystack:
-            return item_type
+    for haystack in ((subtext or "").lower(), _label_type(label)):
+        for needle, item_type in SUBTEXT_TYPES:
+            if needle in haystack:
+                return item_type
     return detection.label_from_url(href)
 
 

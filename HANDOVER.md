@@ -2,6 +2,19 @@
 
 ## Current state
 
+- Every course command takes an optional URL in the same position
+  (`config.add_course_url_arg`), landing in `Settings.course_url` and passed to
+  `BrowserSession.find_course_page`. Without it the first platform tab Chrome
+  lists is used -- that is tab *creation* order, not recency, so it is not a
+  reliable "current" tab; with more than one open the pick is warned about.
+  A bare course link as `argv[1]` runs `dex`; `urls.is_platform_url` is what
+  keeps a mistyped command from being navigated to instead of reported.
+- Sidebar row classification matches the subtext and the `aria-label` as two
+  separate haystacks. Do not concatenate them again: the label is
+  "<type>, <title>, <status>, <duration>", so a title containing "peer",
+  "quiz" or "assignment" would be read as the row's type. Only the label's
+  first comma-separated field is consulted, past any "selected link" prefix.
+
 - `pdex -h` renders `phantadex/overview.py`, not argparse. The page is derived
   from two sources so it cannot drift: `cli.COMMANDS` *is*
   `overview.COMMAND_SUMMARIES`'s key order, and the per-item lines come from each

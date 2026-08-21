@@ -608,6 +608,51 @@ class CoachPracticeTests(unittest.TestCase):
             "LAB",
         )
 
+    def test_a_reading_titled_after_a_peer_assessment_is_still_a_reading(self):
+        # The aria-label carries the title after the type, and this course has
+        # a reading called "... for Module 4 Peer Assessment". Matched against
+        # the whole label it came back PEER_REVIEW, which named a page to read
+        # as work to submit.
+        self.assertEqual(
+            discovery.classify_sidebar_row(
+                "reading",
+                "selected link, reading, digital media consultant activity for "
+                "module 4 peer assessment, not submitted, 10 min",
+                "/learn/c/supplement/bh1As/digital-media-consultant-activity",
+            ),
+            "READING",
+        )
+
+    def test_the_peer_assessment_itself_is_still_peer_review(self):
+        self.assertEqual(
+            discovery.classify_sidebar_row(
+                "honors peer-graded assignment",
+                "honors peer-graded assignment, module 4 peer assessment, locked, 1h",
+                "/learn/c/peer/N6B5V/module-4-peer-assessment",
+            ),
+            "PEER_REVIEW",
+        )
+
+    def test_the_review_step_is_still_told_apart_from_the_submission(self):
+        self.assertEqual(
+            discovery.classify_sidebar_row(
+                "review your peers",
+                "review your peers, module 4 peer assessment, locked",
+                "/learn/c/peer/N6B5V/module-4-peer-assessment/give-feedback",
+            ),
+            "REVIEW_PEERS",
+        )
+
+    def test_a_row_whose_subtext_has_not_rendered_falls_back_to_the_type_field(self):
+        self.assertEqual(
+            discovery.classify_sidebar_row(
+                "",
+                "video, digital audit: assessing content and information quality, 5 min",
+                "/learn/c/lecture/k4grM/digital-audit",
+            ),
+            "VIDEO",
+        )
+
     def test_both_still_reach_the_plugin_handler(self):
         # The map distinguishes them; the runner has one handler for both.
         for segment in ("ungradedWidget", "ungradedLab"):

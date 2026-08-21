@@ -12,6 +12,7 @@ from . import (
     logs,
     overview,
     processes,
+    urls,
     video,
     watch,
 )
@@ -24,12 +25,14 @@ COMMANDS = tuple(overview.COMMAND_SUMMARIES)
 
 def dex_main(argv=None):
     """Prints the active course tree without navigating or writing a ledger."""
-    parser = config.build_parser("Phantadex Dex — show the active course tree.", "dex")
+    parser = config.add_course_url_arg(
+        config.build_parser("Phantadex Dex — show the active course tree.", "dex")
+    )
     settings = config.settings_from_args(parser.parse_args(argv))
     logs.setup(settings.log_level)
 
     with BrowserSession(settings.cdp_url) as browser_session:
-        page = browser_session.find_course_page()
+        page = browser_session.find_course_page(settings.course_url)
         if page is None:
             logs.error("No course tab found. Open a course in the debug Chrome first.")
             return 1
@@ -49,7 +52,9 @@ def dex_main(argv=None):
 
 def skip_main(argv=None):
     """Seeks the active video once to a random point in the configured range."""
-    parser = config.build_parser("Phantadex Skip — seek the active video once.", "skip")
+    parser = config.add_course_url_arg(
+        config.build_parser("Phantadex Skip — seek the active video once.", "skip")
+    )
     parser.add_argument(
         "--video-skip-range",
         default=config.DEFAULT_VIDEO_SKIP_RANGE,
@@ -62,7 +67,7 @@ def skip_main(argv=None):
     logs.setup(settings.log_level)
 
     with BrowserSession(settings.cdp_url) as browser_session:
-        page = browser_session.find_course_page()
+        page = browser_session.find_course_page(settings.course_url)
         if page is None:
             logs.error("No course tab found. Open a video in the debug Chrome first.")
             return 1
@@ -76,12 +81,14 @@ def discover_main(argv=None):
     lands on, and writes the ones that matched to the user state file, which is
     layered over the packaged defaults on the next run.
     """
-    parser = config.build_parser(
-        "Phantadex Discover -- re-verify selectors against the live course.", "discover"
+    parser = config.add_course_url_arg(
+        config.build_parser(
+            "Phantadex Discover -- re-verify selectors against the live course.", "discover"
+        )
     )
     settings = config.settings_from_args(parser.parse_args(argv))
     logs.setup(settings.log_level)
-    discovery.start_dynamic_observation(settings.cdp_url)
+    discovery.start_dynamic_observation(settings.cdp_url, settings.course_url)
     return 0
 
 
@@ -113,7 +120,9 @@ def main(argv=None):
 
     if arguments and arguments[0] in COMMANDS:
         command = arguments.pop(0)
-    elif not arguments or arguments[0].startswith("-"):
+    elif not arguments or arguments[0].startswith("-") or urls.is_platform_url(arguments[0]):
+        # A bare course link is the default command pointed at that item, so
+        # ``pdex <url>`` reads the course the link names.
         command = "dex"
     else:
         program = config.program_name()

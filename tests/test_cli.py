@@ -29,7 +29,8 @@ class FakeBrowserSession:
     def __exit__(self, _exc_type, _exc, _traceback):
         return False
 
-    def find_course_page(self):
+    def find_course_page(self, course_url=""):
+        self.course_url = course_url
         return self.page
 
 
@@ -70,6 +71,7 @@ class PackageCliTests(unittest.TestCase):
             "Module 1": [("Introduction", "VIDEO", "/learn/demo/lecture/abc/video", "2 min")]
         }
         fake_session = FakeBrowserSession(object())
+        self.fake_session = fake_session
         with ExitStack() as stack:
             stack.enter_context(mock.patch.object(cli, "BrowserSession", return_value=fake_session))
             stack.enter_context(
@@ -109,6 +111,30 @@ class PackageCliTests(unittest.TestCase):
         result, output = self._run_dex(["dex"])
         self.assertEqual(result, 0)
         self.assertIn("Demo Course", output)
+
+    def test_a_bare_course_link_reads_that_course(self):
+        # ``pdex <url>`` is the default command pointed at an item, so a link
+        # can be pasted straight in without naming 'dex' first.
+        link = "https://www.coursera.org/learn/demo/lecture/abc/video"
+        result, _ = self._run_dex([link])
+        self.assertEqual(result, 0)
+        self.assertEqual(self.fake_session.course_url, link)
+
+    def test_a_named_item_reaches_the_session_from_any_command(self):
+        result, _ = self._run_dex(["dex", "/learn/demo/lecture/abc/video"])
+        self.assertEqual(result, 0)
+        self.assertEqual(self.fake_session.course_url, "/learn/demo/lecture/abc/video")
+
+    def test_no_link_leaves_the_open_tab_alone(self):
+        self._run_dex([])
+        self.assertEqual(self.fake_session.course_url, "")
+
+    def test_a_mistyped_command_is_not_mistaken_for_a_link(self):
+        cli = self._load_cli()
+        errors = io.StringIO()
+        with redirect_stderr(errors):
+            self.assertEqual(cli.main(["wach"]), 2)
+        self.assertIn("unknown command", errors.getvalue())
 
     def test_default_archive_root_is_phantadex_branded(self):
         cli = self._load_cli()
@@ -270,7 +296,7 @@ class PackageCliTests(unittest.TestCase):
             result = cli.main(["discover", "--cdp-url", "http://localhost:9333"])
 
         self.assertEqual(result, 0)
-        observe.assert_called_once_with("http://localhost:9333")
+        observe.assert_called_once_with("http://localhost:9333", "")
 
     def test_discover_honours_the_verbosity_flag(self):
         cli = self._load_cli()

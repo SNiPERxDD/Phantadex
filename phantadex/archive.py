@@ -65,7 +65,7 @@ def archive_item(page, manager, title, item_type, url):
 def run(settings, force=False):
     """Archives every mapped video transcript and reading in the current course."""
     with BrowserSession(settings.cdp_url) as session:
-        page = session.find_course_page()
+        page = session.find_course_page(settings.course_url)
         if page is None:
             log.error("No course tab found. Open a course in the debug Chrome first.")
             return 1
@@ -115,7 +115,9 @@ def run(settings, force=False):
 
 def main(argv=None):
     """Parses arguments and runs the archiver."""
-    parser = config.build_parser("Phantadex Archive — bulk course content archiver.", "archive")
+    parser = config.add_course_url_arg(
+        config.build_parser("Phantadex Archive — bulk course content archiver.", "archive")
+    )
     parser.add_argument("--force", action="store_true", help="Re-scrape already archived items")
     args = parser.parse_args(argv)
 

@@ -110,5 +110,37 @@ class ItemSegmentTableTests(unittest.TestCase):
         )
 
 
+class CourseLinkTests(unittest.TestCase):
+    """Recognising and normalising a course link a person pasted in."""
+
+    def test_a_link_is_recognised_in_each_form_it_gets_pasted_in(self):
+        for text in (
+            "https://www.coursera.org/learn/x/lecture/AbCd/intro",
+            "http://coursera.org/learn/x",
+            "www.coursera.org/learn/x/lecture/AbCd/intro",
+            "/learn/x/lecture/AbCd/intro",
+        ):
+            self.assertTrue(urls.is_platform_url(text), text)
+
+    def test_anything_that_is_not_a_link_is_not_treated_as_one(self):
+        # These reach the same branch as a course link would, and a mistyped
+        # command being navigated to instead of reported would hide the typo.
+        for text in ("", "wach", "watch", "--skip", "example.com/learn/x", "notcoursera.org/x"):
+            self.assertFalse(urls.is_platform_url(text), text)
+
+    def test_a_link_missing_its_scheme_keeps_its_host(self):
+        # Treating it as a path would produce ".../www.coursera.org/learn/x".
+        self.assertEqual(
+            urls.absolute_url("www.coursera.org/learn/x/lecture/AbCd/intro"),
+            "https://www.coursera.org/learn/x/lecture/AbCd/intro",
+        )
+
+    def test_a_bare_path_still_gains_the_platform_origin(self):
+        self.assertEqual(
+            urls.absolute_url("/learn/x/lecture/AbCd/intro"),
+            "https://www.coursera.org/learn/x/lecture/AbCd/intro",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -14,8 +14,12 @@ from . import config, logs, runner
 
 def main(argv=None):
     """Parses arguments and runs the traversal loop."""
-    parser = config.add_automation_args(
-        config.build_parser("Phantadex Watch — course traversal and archival co-pilot.", "watch")
+    parser = config.add_course_url_arg(
+        config.add_automation_args(
+            config.build_parser(
+                "Phantadex Watch — course traversal and archival co-pilot.", "watch"
+            )
+        )
     )
     settings = config.settings_from_args(parser.parse_args(argv))
     logs.setup(settings.log_level)

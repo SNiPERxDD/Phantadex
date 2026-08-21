@@ -118,16 +118,58 @@ class BrowserSession:
             )
         return f"Could not attach to Chrome at {self.cdp_url}: {detail}"
 
-    def find_course_page(self):
-        """Returns the frontmost supported course tab, or ``None``."""
+    def find_course_page(self, course_url=""):
+        """Returns the course tab to work in, or ``None``.
+
+        Given a ``course_url`` the tab is pointed at it, which also settles
+        which course is meant. Without one the first open platform tab is used;
+        Chrome reports tabs in the order they were opened, not in the order
+        they were last looked at, so with several of them open the choice is
+        announced rather than made silently.
+        """
+        tabs = self._platform_tabs()
+        if course_url:
+            return self._open(tabs[0] if tabs else self.context.new_page(), course_url)
+        if not tabs:
+            return None
+        if len(tabs) > 1:
+            logs.get_logger().warning(
+                "%d course tabs are open; working in %r. "
+                "Close the others, or pass the item URL to choose.",
+                len(tabs),
+                self._describe(tabs[0]),
+            )
+        tabs[0].bring_to_front()
+        return tabs[0]
+
+    def _platform_tabs(self):
+        """Returns every open tab on the learning platform, in Chrome's order."""
+        tabs = []
         for page in self.context.pages:
             try:
                 if urls.PLATFORM_HOST in page.url:
-                    page.bring_to_front()
-                    return page
+                    tabs.append(page)
             except Exception as exc:
                 log.debug("Could not inspect a tab: %s", exc)
-        return None
+        return tabs
+
+    def _open(self, page, course_url):
+        """Navigates ``page`` to a course link and returns it."""
+        target = urls.absolute_url(course_url)
+        logs.nav(f"opening {urls.normalize_path(target)}")
+        page.goto(target, wait_until="domcontentloaded")
+        interaction.arm_media_guard(page)
+        page.bring_to_front()
+        return page
+
+    @staticmethod
+    def _describe(page):
+        """Returns a short identifier for a tab, for use in a warning."""
+        try:
+            return page.title() or urls.normalize_path(page.url)
+        except Exception as exc:
+            log.debug("Could not read a tab title: %s", exc)
+            return "the first one"
 
     def open_course_home(self):
         """Opens the supported platform home page and returns its tab."""

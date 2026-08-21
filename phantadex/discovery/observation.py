@@ -119,14 +119,20 @@ def _course_tab(browser_context):
     return None
 
 
-def start_dynamic_observation(cdp_url=config.CDP_URL):
-    """Watches the attached browser and verifies selectors on every item opened."""
+def start_dynamic_observation(cdp_url=config.CDP_URL, course_url=""):
+    """Watches the attached browser and verifies selectors on every item opened.
+
+    A ``course_url`` opens that item before the pass begins, which is how a
+    course is named when several tabs are open.
+    """
     logs.step("observation active; smart-hop navigation engaged")
     logs.step("press Ctrl+C to disconnect")
 
     state = ObservationState(selectors=schema.verified_selectors())
     try:
         with session.BrowserSession(cdp_url) as browser_session:
+            if course_url:
+                browser_session.find_course_page(course_url)
             _observe(browser_session.context, state)
     except KeyboardInterrupt:
         logs.interrupted("Session terminated by user.")

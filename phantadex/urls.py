@@ -61,7 +61,34 @@ def absolute_url(url_or_path):
         return ""
     if url_or_path.startswith("http://") or url_or_path.startswith("https://"):
         return url_or_path
+    # A link copied without its scheme -- "www.coursera.org/learn/..." -- is a
+    # URL, not a path. Prefixing the origin would bury the host inside the path
+    # and produce a link to a page that does not exist.
+    if _has_platform_host(url_or_path):
+        return f"https://{url_or_path}"
     return f"{PLATFORM_ORIGIN}{normalize_path(url_or_path)}"
+
+
+def _has_platform_host(text):
+    """Reports whether the first segment of ``text`` is a platform hostname."""
+    host = text.split("/", 1)[0].split("?", 1)[0].lower()
+    return host == PLATFORM_HOST or host.endswith(f".{PLATFORM_HOST}")
+
+
+def is_platform_url(text):
+    """Reports whether a string addresses a page on the learning platform.
+
+    Accepts the forms a course link is realistically pasted in: the full URL,
+    the same link with its scheme dropped, and a bare ``/learn/...`` path. Used
+    to tell a course link apart from a mistyped command name, so only one of
+    the two is treated as a place to navigate to.
+    """
+    candidate = (text or "").strip()
+    if not candidate:
+        return False
+    if candidate.startswith("/learn/"):
+        return True
+    return _has_platform_host(candidate.split("://", 1)[-1])
 
 
 def item_id(url_or_path):

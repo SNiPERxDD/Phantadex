@@ -21,6 +21,10 @@ class Settings:
     transcript_dir: str = TRANSCRIPT_DIR
     log_level: str = "INFO"
 
+    # Course item to open before the command starts. Empty means work in the
+    # course tab already open, which is only unambiguous while there is one.
+    course_url: str = ""
+
     # Fraction of a video that must elapse before advancing, as a ``(min, max)``
     # percent range sampled once per video. A single number is accepted too and
     # is held as a range of zero width.
@@ -115,6 +119,26 @@ def build_parser(description, subcommand=""):
         default=None,
         choices=LOG_LEVELS,
         help="Set the level explicitly. Takes precedence over -v and -q.",
+    )
+    return parser
+
+
+def add_course_url_arg(parser):
+    """Adds the optional course link a command can be pointed at.
+
+    Naming the item removes the guesswork of picking among several open tabs,
+    and lets a run be started from a link without switching to the browser
+    first. Every command that reads a course takes it, in the same position.
+    """
+    parser.add_argument(
+        "url",
+        nargs="?",
+        default="",
+        metavar="URL",
+        help=(
+            "Course item to open first, as a full link or a /learn/... path. "
+            "Without it the command works in the open course tab."
+        ),
     )
     return parser
 
@@ -277,4 +301,5 @@ def settings_from_args(args):
         reading_default_minutes=getattr(args, "reading_minutes", DEFAULT_READING_MINUTES),
         pause_on_graded=getattr(args, "pause_on_graded", False),
         resume_at_incomplete=not getattr(args, "no_resume", False),
+        course_url=getattr(args, "url", "") or "",
     )

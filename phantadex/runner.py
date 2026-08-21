@@ -62,7 +62,7 @@ class Runner:
     def run(self):
         """Connects and loops until the course ends or the user interrupts."""
         with BrowserSession(self.settings.cdp_url) as session:
-            page = session.find_course_page()
+            page = session.find_course_page(self.settings.course_url)
             if page is None:
                 logs.get_logger().warning("No course tab found. Opening one...")
                 session.open_course_home()

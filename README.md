@@ -158,6 +158,19 @@ Sign in to the course in that window, then leave it open.
     pdex watch -h
     ```
 
+    **Which tab it works in:** every command that reads a course uses the open
+    course tab, so keep one course tab open and no more. With several open, the
+    first one Chrome lists is used and the choice is reported rather than made
+    silently. Naming a course item settles it and opens the item, as a full
+    link or a `/learn/...` path:
+    ```bash
+    pdex https://www.coursera.org/learn/<course>/lecture/<id>/<slug>
+    pdex watch /learn/<course>/home/week/1
+    ```
+    A run still starts at the first unfinished item; add `--no-resume` to start
+    on the item named. `dex`, `skip`, `watch`, `archive` and `discover` all take
+    the argument in the same position.
+
     **Option A: Phantadex Dex (Default)**
     Prints the active course tree without navigating or writing the ledger.
     `✓` means completed, `○` means incomplete, and `?` means the platform did
@@ -401,7 +414,10 @@ python run_tests.py --live   # additionally probe a running Chrome session
     input, stop at the bottom, and exit immediately if the active item changes.
 *   **Outline:** Row titles and their subtext are read from the element tree, so
     a module that is collapsed when the map is built still yields the same
-    result as an expanded one.
+    result as an expanded one. Each text source is matched on its own: a row's
+    subtext names its type by itself, and its `aria-label` names it in the
+    first comma-separated field, ahead of the title. Matching the title too
+    made a reading called "... for Module 4 Peer Assessment" a peer review.
 *   **Surveys:** An item whose title names a questionnaire about the learner is
     stepped past without dwelling, archiving or answering. The marker is a full
     phrase, so a reading about surveys is still treated as course content.
