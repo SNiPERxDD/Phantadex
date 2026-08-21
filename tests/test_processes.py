@@ -141,8 +141,19 @@ class TerminateTests(unittest.TestCase):
         self.assertEqual(stopped, [])
         self.assertEqual(survivors, [12])
 
-    def test_signalling_uses_the_real_process_id(self):
-        self.assertEqual(processes.is_alive(os.getpid()), True)
+    def test_this_process_is_alive(self):
+        self.assertTrue(processes.is_alive(os.getpid()))
+
+    def test_windows_liveness_never_signals(self):
+        # Signal 0 is CTRL_C_EVENT on Windows, so probing with `os.kill` sends a
+        # console interrupt to the target's group -- this process included.
+        with (
+            mock.patch.object(processes.os, "name", "nt"),
+            mock.patch.object(processes, "_windows_alive", return_value=True) as probe,
+            mock.patch.object(processes.os, "kill", side_effect=AssertionError("signalled")),
+        ):
+            self.assertTrue(processes.is_alive(4321))
+        probe.assert_called_once_with(4321)
 
 
 class StopAllTests(unittest.TestCase):

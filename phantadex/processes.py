@@ -7,6 +7,7 @@ because a registry file survives a hard kill and then reports runs that are no
 longer there. The process table is asked instead, and it is authoritative.
 """
 
+import ctypes
 import os
 import signal
 import subprocess
@@ -132,8 +133,38 @@ def _signal(pid, number):
         return True
 
 
+# Windows process states, from the Win32 API.
+_ACCESS_DENIED = 5
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+_STILL_ACTIVE = 259
+
+
+def _windows_alive(pid):
+    """Reports whether a process exists, without signalling it.
+
+    ``os.kill(pid, 0)`` is not a liveness probe on Windows: signal 0 is
+    ``CTRL_C_EVENT``, so the "harmless" probe delivers a console interrupt to
+    the target's process group -- which includes this process when the two
+    share a console. The Win32 handle is opened instead and its exit code read.
+    """
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        # Refused rather than absent: the process exists, out of reach.
+        return kernel32.GetLastError() == _ACCESS_DENIED
+    exit_code = ctypes.c_ulong()
+    try:
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+            return True
+    finally:
+        kernel32.CloseHandle(handle)
+    return exit_code.value == _STILL_ACTIVE
+
+
 def is_alive(pid):
     """Reports whether a process still exists."""
+    if os.name == "nt":
+        return _windows_alive(pid)
     return _signal(pid, 0)
 
 
@@ -156,8 +187,9 @@ def terminate(pids, grace_seconds=TERM_GRACE_SECONDS, sleep=time.sleep):
         remaining = [pid for pid in remaining if is_alive(pid)]
 
     for pid in remaining:
-        # SIGKILL is unavailable on Windows; TerminateProcess is what SIGTERM
-        # already mapped to there, so there is no harder signal to escalate to.
+        # SIGKILL is unavailable on Windows, where `os.kill` with any signal
+        # other than a console event already calls TerminateProcess: there is
+        # no harder step to escalate to.
         _signal(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
     sleep(POLL_SECONDS)
 
