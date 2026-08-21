@@ -28,10 +28,10 @@ classifiers = [
 dependencies = ["playwright>=1.40,<2", "plyer>=2,<3", "PyYAML>=6,<7"]
 
 [project.urls]
-Homepage = "https://github.com/SNiPERxDD/phantadex"
-Source = "https://github.com/SNiPERxDD/phantadex"
-Changelog = "https://github.com/SNiPERxDD/phantadex/blob/main/CHANGELOG.md"
-Issues = "https://github.com/SNiPERxDD/phantadex/issues"
+Homepage = "https://github.com/SNiPERxDD/Phantadex"
+Source = "https://github.com/SNiPERxDD/Phantadex"
+Changelog = "https://github.com/SNiPERxDD/Phantadex/blob/main/CHANGELOG.md"
+Issues = "https://github.com/SNiPERxDD/Phantadex/issues"
 
 [project.scripts]
 phantadex = "phantadex.cli:main"
