@@ -2,88 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
-## [2.5.0] - 2026-02-03
-### 💎 Platinum Edition (Verification Suite)
-- **Rapid Diagnostic Harness**: Created `run_tests.py`, a high-speed verification suite using **Monkey Patching** and **Dependency Injection**. It compresses 10-minute automated cycles into <30-second logic checks.
-- **Isolated Testing (Sandboxing)**: Verification now runs in a dedicated `test_artifacts` environment, ensuring data integrity for the production `coursera_transcripts` folder.
-- **JS Injection Verification**: Test harness validates video handler speed-hacks and physics engine stability in isolation.
+## Phantadex / Coursera
 
-## [2.0.0] - 2026-02-03
-### 🏆 Gold Master Edition
-- **Adaptive Physics Engine**: Refined `human_move` to use dynamic trajectory steps (5-15) based on Auditor feedback, eliminating robotic jitter on short movements.
-- **Race Condition Shield**: Implemented Double-Click Guards in both Video and Reading handlers. Navigation logic now performs context-verification and visibility checks BEFORE fallback clicks.
-- **Modal-Resilient Scrolling**: Upgraded `smart_reading_session` to re-calculate content coordinates dynamically and clear modals BEFORE each scroll event.
-- **Enhanced Loop Stability**: Refined "stuck" recovery with explicit page reloads and increased tolerance for heavy UI overlays.
-
-## [1.5.0] - 2026-02-03
-### 🚀 Features (Physics Engine Upgrade)
-- **Human Physics Helpers**: Implemented `human_move` and `human_scroll` to eliminate bot-like "teleportation" using trajectory-based cursor motion and inertial micro-scrolling.
-- **Content-Aware Reading**: Introduced `smart_reading_session` which calculates real reading durations based on word count (WPM) and automatically detects once the content bottom is reached.
-- **Hardened Loop Stability**: Increased "stuck" tolerance to 20 loops (approx 3 mins) to handle UI lag/overlays, with an added auto-reload recovery mechanism.
-
-## [1.4.1] - 2026-02-02
-### 🚀 Features
-- **Robust Transcript extraction**: Introduced a 2-stage extraction system. It first attempts UI-based scraping and automatically falls back to the "Downloads" tab to process `.txt` assets if the UI is brittle.
-- **Selector Schema Update**: Added `downloads_tab` and `transcript_download_link` to `discover_selectors_coursera.py` for automated asset discovery.
-
-## [1.4.2] - 2026-02-03
-### 🛡️ Stability Hardening
-- **Self-Healing Loop**: implemented automatic page re-acquisition if the browser connection is dropped.
-- **Fail-Safe wrappers**: Wrapped all critical handlers (Quiz, Video, Reading) in granular `try-except` blocks to prevent crashes.
-- **Fixed Next Button Logic**: Updated `get_next_button` to prioritize *visible* elements and hardened `human_click` to ignore hover failures (overlay resilience).
-- **Fixed Sidebar Scrolling**: Constrained random mouse movements to the main content area to prevent accidental sidebar navigation.
-- **Enhanced Content Detection**: Added explicit detection/skip for "Peer Assessment", "Honors Assignment", and "Review Your Peers".
-
-## [1.4.0] - 2026-02-02
-### 🚀 Features (Stealth Suite)
-- **High-Precision Organic Completion**: Randomized video completion target (97.0 - 100.0%) to evade behavioral analysis.
-- **Attention Fidgeting**: Added randomized mouse "fidget" movements during video playback and reading sessions to simulate active engagement.
-- **Human Clicking (Tactical Approach)**: Refactored all button interactions to a unified `human_click` utility with smooth glide trajectories (steps) and organic reaction times.
-
-## [1.3.0] - 2026-02-02
-### 🚀 Features
-- **Dedicated Targeted Archiver**: Introduced `coursera_archiver.py`, a standalone script for high-efficiency, map-driven scraping.
-- **Direct Navigation Engine**: Bypasses brittle UI traversal by visiting targets directly from the internal map.
-- **HVC (High-Value Content) Focus**: Targeted extraction of Video transcripts and Reading body text only.
-- **Resumption Intelligence**: Automatically skips items already present in the XML ledger to prevent redundant hits.
-
-## [1.1.0] - 2026-02-02
-### 🚀 Features
-- **Global Course Mapping**: Added initial deep scan to expand sidebar module accordions and print a high-resolution ASCII tree of the entire course structure.
-- **Literal Type Extraction**: Refactored type detection to extract categories directly from sidebar subtext (e.g., "Ungraded Plugin", "Reading", "Video"). This eliminates hardcoded type guessing.
-- **Technical URL Prioritization**: Scanning logic now prioritizes technical URL markers (like `/ungradedlab/`) over filler keywords. This ensures introductory content correctly satisfies discovery targets and prevents infinite navigation loops.
-- **Dynamic Exit Targets**: Logic now determines which core lesson types are actually present in the course and only awaits those before autonomous termination.
-- **Filler Content Filtering**: Automatically recognizes and ignores non-essential items like surveys ("How Was the Course?"), welcome pages, and orientations using a combination of subtext parsing and keyword detection.
-- **Improved Smart-NAV**: Navigation now utilizes the global course map to efficiently hop across modules to find missing targets.
-
-### 🛠 Improvements
-- Refactored sidebar parsing to handle flat DOM structures and improved type detection via `aria-label`.
-- Added `wait_for_selector` and multi-tag support (H2, H3, Button) for resilient mapping.
-- Cleaned up tree visualization with ASCII connectors and type icons.
-
-## [1.0.1] - 2026-01-25
-### 🛠 Fixes
-- **Video Failsafe**: Added 30-second pause timeout to force-resume videos stuck in buffering or paused states.
-- **Log Spam Fix**: Added URL-based stuck detection (`stuck_on_item_counter`) to quietly exit when the course is finished.
-
-## [1.0.0] - 2026-01-25
-
-### 🚀 Features
-- **CDP Stealth**: Implemented Chrome DevTools Protocol attachment to bypass bot detection.
-- **Videos**: 100% completion logic (waits for native `ended` event).
-- **Readings**: Human-like randomized scrolling (variable speed/intervals).
-- **Archival**: Automatic transcript and reading text extraction with strict versioning (`_v2.txt`).
-- **State Persistence**: `visited_history.json` tracks completed URLs to prevent redundancy.
-- **Robustness**: 
-    - Auto-detects and pauses for **Graded Quizzes**.
-    - Auto-skips **Ungraded Plugins** and **Practice Quizzes**.
-    - Graceful `Ctrl+C` exit handling.
-
-### 🛠 Improvements
-- Suppressed Node.js/Playwright deprecation warnings.
-- Added cross-platform Windows input fallback (safe-stay default).
-- strict sidebar completion detection (no partial title matches).
-
-### 📖 Documentation
-- "Doctrine" standard README with technical specifications.
-- Added Shields.io status badges.
+- **[2026-08-21 15:07:55 +0530]** | Fixed two Windows-only failures: console output now writes through a UTF-8 stream, so redirecting a run to a file no longer raises `UnicodeEncodeError` on the first status glyph, and `sanitize_filename` renames the reserved device names (`CON`, `NUL`, `COM1`...) that Windows refuses to create as files | Files: `phantadex/logs.py`, `phantadex/storage.py`, `tests/test_logs.py`, `tests/test_storage.py`, `HANDOVER.md`, `CHANGELOG.md`
+- **[2026-08-21 21:10:00 +0530]** | Added the `discover` subcommand, so the selector-verification pass runs as `pdex discover` with the shared `--cdp-url` and verbosity flags; it had no CLI entry point and `python -m phantadex.discovery` took no arguments | Files: `phantadex/cli.py`, `tests/test_cli.py`, `README.md`, `HANDOVER.md`, `CHANGELOG.md`
+- **[2026-08-21 20:35:00 +0530]** | Split `discovery.py` into the package `phantadex/discovery/` (`rules`, `context`, `course_map`, `probing`, `observation`, `state`) behind a re-exporting facade; moved `ELEMENTS_SCHEMA` into the leaf module `phantadex/element_schema.py` so the runtime schema no longer imports the discovery tool; replaced `GLOBAL_REQUIRED_TYPES` and the mapping function's cached attributes with an explicit `ObservationState`; routed the sidebar hop through `urls.absolute_url` and the course-tab check through `urls.PLATFORM_HOST`; moved the `NODE_OPTIONS` side effect into `session.quiet_node_driver()` | Files: `phantadex/discovery/`, `phantadex/element_schema.py`, `phantadex/schema.py`, `phantadex/session.py`, `phantadex/urls.py`, `tests/test_discovery.py`, `tests/test_review_regressions.py`, `README.md`, `HANDOVER.md`, `CHANGELOG.md`
+- **[2026-08-21 13:00:08 +0530]** | Added `-v`/`--verbose` and `-q`/`--quiet` shorthands, with `--log-level` still winning when set explicitly; logged the actions that were previously invisible at every level -- each successful click with the label of the control it hit, each scroll's distance, the play path taken, resumes, seeks, idle cursor moves and the archive and home navigations; and routed discovery's 36 raw `print` calls through the logger so its output honours the log level | Files: `phantadex/config.py`, `phantadex/interaction.py`, `phantadex/video.py`, `phantadex/handlers.py`, `phantadex/archive.py`, `phantadex/session.py`, `phantadex/discovery.py`, `tests/test_cli.py`, `tests/test_interaction.py`, `tests/test_discovery.py`, `README.md`, `HANDOVER.md`, `CHANGELOG.md`
+- **[2026-08-21 03:41:12 +0530]** | Made the click jitter real by passing it as a `position` to hover and click, which previously moved the cursor to an offset point and still clicked the element's exact centre; turned off forced clicking by default so a click swallowed by an overlay is reported as a failure rather than a success, with a 5-second bound on the actionability wait; and dropped the synthetic `timeupdate` from the seek script, the only script-made event in the package, since assigning `currentTime` already fires the browser's own seeking, seeked and timeupdate | Files: `phantadex/interaction.py`, `phantadex/video.py`, `tests/fakes.py`, `tests/test_interaction.py`, `tests/test_review_regressions.py`, `HANDOVER.md`, `CHANGELOG.md`
+- **[2026-08-21 03:05:40 +0530]** | Confined the in-video interrupt rules (Reflect, Poll, Question) to the player's dialog and `rc-VideoQuiz` container instead of falling back to the page, so an ordinary heading containing "Poll" or "Question" can no longer satisfy a modal rule; the page fallback now serves only the Honor Code and demographics interstitials | Files: `phantadex/modals.py`, `tests/test_modals.py`, `HANDOVER.md`, `CHANGELOG.md`
+- **[2026-08-21 02:35:10 +0530]** | Anchored item identity on the course slug and a known item segment so week pages and same-id items in different courses no longer compare equal; gave the URL segment precedence over an embedded player when classifying a page; derived the scanner's segment table from the classifier's so the two cannot drift; restored verified-selector priority by scanning candidates in declaration order instead of one DOM-ordered joined locator; advanced past a cleared graded quiz instead of re-entering it every tick; quarantined an unparseable ledger rather than rebuilding over it; archived skipped discussions; kept the failure count on an item that cannot be advanced past; preferred dialog scope and a heading-local button container when dismissing modals; seeded selector discovery from learned state alone so packaged defaults are no longer frozen into the state file; and made a zero-delta scroll a no-op | Files: `phantadex/urls.py`, `phantadex/detection.py`, `phantadex/discovery.py`, `phantadex/navigation.py`, `phantadex/schema.py`, `phantadex/handlers.py`, `phantadex/course_manager.py`, `phantadex/runner.py`, `phantadex/modals.py`, `phantadex/interaction.py`, `tests/**`, `HANDOVER.md`, `CHANGELOG.md`
+- **[2026-08-21 00:52:35 +0530]** | Moved discovery-verified selectors out of package data into an atomically written user state file layered over shipped defaults; replaced fuzzy archive dedupe with exact content matching so the saved file and the XML ledger always agree; made `--video-threshold` the actual watch target with 0-100 validation and a frozen-playback bound; distinguished an unmapped item from the end of the course; scoped locked-item detection so the ordinary pager is not mistaken for a lock; recorded persistent handler failures in the ledger; keyed course identity on the URL slug; made discussions archivable; scoped sidebar module headers to the outline and merged same-titled modules; recognised `ungradedLti` as a lab; and adopted a Ruff configuration with a CI lint job | Files: `phantadex/schema.py`, `phantadex/discovery.py`, `phantadex/storage.py`, `phantadex/course_manager.py`, `phantadex/handlers.py`, `phantadex/config.py`, `phantadex/interaction.py`, `phantadex/navigation.py`, `phantadex/page_ops.py`, `phantadex/runner.py`, `phantadex/urls.py`, `pyproject.toml`, `.github/workflows/ci.yml`, `tests/**`, `README.md`, `HANDOVER.md`, `CHANGELOG.md`
+- **[2026-08-20 23:59:29 +0530]** | Scoped reading scroll discovery to content ancestors, stopped movement at the bottom, ended reading sessions on item navigation, and rejected transient course-name placeholders | Files: `phantadex/interaction.py`, `phantadex/handlers.py`, `phantadex/discovery.py`, `phantadex/archive.py`, `tests/test_interaction.py`, `tests/test_handlers.py`, `tests/test_discovery.py`, `tests/test_branding.py`, `README.md`, `PHANTADEX_ARCHITECTURE_REVIEW.md`, `HANDOVER.md`, `CHANGELOG.md`
+- **[2026-08-20 23:30:59 +0530]** | Unified Archive/Dex terminal rendering with compact rows, explicit course states, and TTY map spinners; migrated archive roots and ledgers to `phantadex_archive/<course>/<slug>.pdex.xml` without overwrites; recovered Watch from locked/missing panes, paused required assignments without cycling, and cleaned CDP interruption shutdown | Files: `phantadex/logs.py`, `phantadex/archive.py`, `phantadex/cli.py`, `phantadex/discovery.py`, `phantadex/config.py`, `phantadex/urls.py`, `phantadex/course_manager.py`, `phantadex/page_ops.py`, `phantadex/navigation.py`, `phantadex/runner.py`, `phantadex/handlers.py`, `phantadex/session.py`, `phantadex/watch.py`, `phantadex/config.yaml`, `tests/**`, `.gitignore`, `README.md`, `PHANTADEX_ARCHITECTURE_REVIEW.md`, `HANDOVER.md`, `CHANGELOG.md`
+- **[2026-08-20 22:45:19 +0530]** | Routed transcript, modal, discovery navigation, and sidebar expansion controls through the shared randomized pointer and reaction-delay click path, with regression coverage | Files: `phantadex/page_ops.py`, `phantadex/modals.py`, `phantadex/discovery.py`, `tests/fakes.py`, `tests/test_modals.py`, `tests/test_page_ops.py`, `tests/test_discovery.py`, `README.md`, `COURSERA_ARCHITECTURE_REVIEW.md`, `HANDOVER.md`, `CHANGELOG.md`
+- **[2026-08-20 22:37:20 +0530]** | Added packaged verified selectors, bounded handler retries, shared reading/video control clicks, CDP cleanup, macOS/Windows Chrome launch support, bounded dependencies, and cross-platform CI | Files: `phantadex/config.yaml`, `phantadex/schema.py`, `phantadex/session.py`, `phantadex/runner.py`, `phantadex/navigation.py`, `phantadex/video.py`, `scripts/start_chrome_debug.py`, `.github/workflows/ci.yml`, `pyproject.toml`, `requirements.txt`, `tests/test_schema.py`, `tests/test_branding.py`, `tests/test_runner.py`, `tests/test_navigation.py`, `README.md`, `COURSERA_ARCHITECTURE_REVIEW.md`, `HANDOVER.md`, `CHANGELOG.md`
+- **[2026-08-20 21:35:55 +0530]** | Fixed cross-row completion false positives, verified live reading completion, and added completed/incomplete/unknown markers to the Dex tree without changing course-map tuples | Files: `phantadex/page_ops.py`, `phantadex/discovery.py`, `phantadex/cli.py`, `tests/test_page_ops.py`, `tests/test_discovery.py`, `tests/test_navigation.py`, `tests/test_cli.py`, `README.md`, `COURSERA_ARCHITECTURE_REVIEW.md`, `HANDOVER.md`, `CHANGELOG.md`
+- **[2026-08-20 21:01:44 +0530]** | Restored `--reading-minutes MIN[-MAX]` for fixed or randomized fallback reading dwell, with positive ordered validation and startup visibility | Files: `phantadex/config.py`, `tests/test_cli.py`, `README.md`, `COURSERA_ARCHITECTURE_REVIEW.md`, `HANDOVER.md`, `CHANGELOG.md`
+- **[2026-08-20 17:24:11 +0530]** | Restored live TXT transcript fallback for Coursera's Files panel, prevented open-panel toggle failures, added cross-process course locking with atomic XML replacement on POSIX/Windows, and covered browser discovery orchestration | Files: phantadex/: discovery.py, page_ops.py, course_manager.py; tests/: test_discovery.py, test_page_ops.py, test_course_manager.py; config.yaml, README.md, COURSERA_ARCHITECTURE_REVIEW.md, HANDOVER.md, CHANGELOG.md
+- **[2026-08-20 17:00:31 +0530]** | Added installable phantadex/pdex CLI aliases with default Dex tree, explicit Skip/Watch/Archive modes, package execution (__main__.py), and backwards-compatibility wrappers (Skip reuses randomized 97.5-98.5% seek; Watch defaults to 100% completion) | Files: phantadex/: cli.py, __main__.py, watch.py, archive.py; tests/: test_cli.py, test_branding.py; pyproject.toml, phantadex_watch.py, phantadex_archive.py, README.md, CONTRIBUTING.md, COURSERA_ARCHITECTURE_REVIEW.md, HANDOVER.md
+- **[2026-08-20 16:17:42 +0530]** | Rebranded package and entry points as Phantadex, wiring Watch, Archive, Dex, and Link console identities while preserving Coursera archive directory paths | Files: phantadex/**; tests/**; phantadex_watch.py, phantadex_archive.py, run_tests.py, README.md, CONTRIBUTING.md, COURSERA_ARCHITECTURE_REVIEW.md, HANDOVER.md
+- **[2026-08-20]** | Restructured into the `coursera/` package with a `Runner`, per-content handlers, unified `detection.classify()` URL-segment classification, shared navigation, and synchronized `config.yaml`/fallback selector resolution | Files: `coursera/runner.py`, `coursera/handlers.py`, `coursera/detection.py`, `coursera/navigation.py`, `coursera/schema.py`, `coursera/discovery.py`, `coursera/config.py`, `config.yaml`
+- **[2026-08-20]** | Updated archive persistence to disambiguate unmapped items with opaque IDs, preserve distinct content versions, reconcile the XML ledger on load, and normalize transcript/reading text while retaining cue timestamps | Files: `coursera/course_manager.py`, `coursera/storage.py`, `coursera/text.py`; `tests/**`
+- **[2026-08-20]** | Fixed traversal failures in modal handling, reading-container scrolling, non-interactive stdin prompts, and unverified Next-button clicks | Files: `coursera/modals.py`, `coursera/interaction.py`, `coursera/prompt.py`, `coursera/navigation.py`; `tests/**`
+- **[2026-08-20]** | Added 174 offline Playwright-fake tests, configurable CDP/archive/log/video CLI options, connection diagnostics, terminal glyph logs with `NO_COLOR` support, and browser-profile ignore rules | Files: `tests/**`, `run_tests.py`, `coursera/config.py`, `coursera/session.py`, `coursera/logs.py`, `.gitignore`, `requirements.txt`
+- **[2026-04-26 00:21:57 IST]** | Added direct video skip range support (VIDEO_DIRECT_SKIP_RANGE / --video-skip-range, defaulting to randomized 97.5-98.5% seek and 100%/ended completion), fixed fallback transcript directory creation, normalized item path comparisons, prioritized course-map navigation order, updated config.yaml selectors via discovery, and added PyYAML dependency | Files: coursera_stealth.py, config.yaml, requirements.txt, CHANGELOG.md
+- **[2026-02-03 (v2.5.0)]** | Added the `run_tests.py` offline verification suite, isolated test artifacts, and playback/timing checks | Files: `run_tests.py`, `coursera_stealth.py`
+- **[2026-02-03 (v2.0.0)]** | Added multi-step pointer movement, double-click guards, modal-aware scrolling, and automatic reload after repeated stalls | Files: `coursera_stealth.py`
+- **[2026-02-03 (v1.5.0)]** | Added pointer and scroll trajectories, WPM-based reading sessions with content-bottom detection, and a 20-iteration stuck threshold | Files: `coursera_stealth.py`
+- **[2026-02-03 (v1.4.2)]** | Added browser reconnection, guarded handler failures, visible-first Next selection, bounded pointer movement, and Peer/Honors assessment detection | Files: `coursera_stealth.py`
+- **[2026-02-02 (v1.4.1)]** | Added two-stage transcript extraction with a Downloads `.txt` fallback and corresponding discovery selectors | Files: `coursera_stealth.py`, `discover_selectors_coursera.py`
+- **[2026-02-02 (v1.4.0)]** | Added randomized video completion targets, playback/reading pointer movement, and randomized click reaction intervals | Files: `coursera_stealth.py`
+- **[2026-02-02 (v1.3.0)]** | Added the standalone map-driven `coursera_archiver.py` with XML-ledger resumption | Files: `coursera_archiver.py`, `coursera_stealth.py`
+- **[2026-02-02 (v1.1.0)]** | Added course-map scanning, item-type extraction, URL-segment prioritization, exit-target discovery, and non-essential item filtering | Files: `coursera_stealth.py`
+- **[2026-01-25 (v1.0.1)]** | Added a 30-second buffering timeout and URL-based stuck counter | Files: `coursera_stealth.py`
+- **[2026-01-25 (v1.0.0)]** | Added CDP attachment, native-ended video completion, reading scrolling, versioned text extraction, local visit history, graded-quiz pause, and ungraded-item skip behavior | Files: `coursera_stealth.py`, `visited_history.json`, `README.md`

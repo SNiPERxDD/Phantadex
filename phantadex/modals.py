@@ -1,0 +1,114 @@
+"""Dismissal of the interstitial dialogs Coursera injects mid-item.
+
+Each rule is evaluated independently. Previously all three checks shared a
+single ``try/except: pass``, so a Playwright strict-mode violation on the first
+check silently skipped Honor Code *and* Reflect handling for the whole run.
+"""
+
+import time
+
+from . import logs
+
+log = logs.get_logger("modals")
+
+DIALOG_SELECTOR = "[role='dialog'], [aria-modal='true']"
+
+# Scope for the prompts Coursera injects into a playing video. A live capture of
+# a Poll showed it inside `role="dialog" aria-modal="true"` (`cds-Dialog-dialog`)
+# nested in the player's `rc-VideoQuiz` container; the container is included so
+# an interrupt that renders without the dialog wrapper is still reachable.
+IN_VIDEO_SCOPE = "[role='dialog'], [aria-modal='true'], .rc-VideoQuiz"
+
+# (heading text, heading selector, button labels to try, message, scope)
+#
+# `scope` is the container the rule is confined to. ``None`` means the rule may
+# fall back to the page, which only the full-page interstitials need. Every
+# in-video prompt is scoped, because `has_text` is a case-insensitive substring
+# match: unscoped, an ordinary page heading containing "Poll" or "Question"
+# ("Question 1 of 5" on a graded quiz) satisfied the rule and sent it looking
+# for a dismiss button.
+MODAL_RULES = (
+    ("Coursera Honor Code", "h1, h2", ("Continue",), "Honor Code accepted", None),
+    (
+        "Demographics Survey",
+        "h1, h2",
+        ("Continue", "Submit"),
+        "demographics survey dismissed",
+        None,
+    ),
+    ("Reflect", "h1, h2, h3", ("Continue",), "video interrupt dismissed", IN_VIDEO_SCOPE),
+    ("Poll", "h2, h3", ("Skip", "Continue"), "poll skipped", IN_VIDEO_SCOPE),
+    # The in-video comprehension check. `Submit` stays disabled until the
+    # learner answers, so `Skip` is the only way past it.
+    ("Question", "h2, h3", ("Skip",), "in-video question skipped", IN_VIDEO_SCOPE),
+)
+
+
+def dismiss_all(page):
+    """Clears every known modal currently on screen. Returns the count handled."""
+    handled = 0
+    for heading, heading_selector, button_labels, message, scope in MODAL_RULES:
+        try:
+            if _dismiss_one(page, heading, heading_selector, button_labels, message, scope):
+                handled += 1
+        except Exception as exc:
+            log.debug("Modal rule %r failed: %s", heading, exc)
+    return handled
+
+
+def _dismiss_one(page, heading, heading_selector, button_labels, message, scope=None):
+    """Handles a single modal rule. Returns True when a button was clicked."""
+    root = page.locator(scope or DIALOG_SELECTOR, has_text=heading).first
+    if root.count() == 0:
+        if scope:
+            return False
+        # Honor Code and the demographics survey render as full-page
+        # interstitials rather than dialogs, so those two rules fall back to the
+        # page. The button search below is still narrowed to the heading's own
+        # container, so the click cannot land elsewhere on the page.
+        root = page
+
+    # `.first` matters: a bare multi-match locator raises under strict mode.
+    header = root.locator(heading_selector, has_text=heading).first
+    if header.count() == 0 or not header.is_visible():
+        return False
+
+    if root is page:
+        root = _nearest_button_container(header, page)
+
+    for label in button_labels:
+        # Scoped to `root` so a scoped rule can never reach a same-named button
+        # elsewhere on the page.
+        button = root.locator(f"button:has-text('{label}')").first
+        try:
+            if button.count() > 0 and button.is_visible():
+                # Lazy import avoids the interaction -> modals module cycle.
+                from . import interaction
+
+                if not interaction.click(page, button, force=True, reaction_range=(0.2, 0.5)):
+                    continue
+                # Logged after the click, not before: an earlier version
+                # announced the dismissal up front, so the log claimed success
+                # even when no button matched.
+                logs.step(message)
+                time.sleep(1)
+                return True
+        except Exception as exc:
+            log.debug("Could not click %r on %r modal: %s", label, heading, exc)
+    log.debug("Modal %r visible but no dismiss button matched %s", heading, button_labels)
+    return False
+
+
+def _nearest_button_container(header, page):
+    """Returns the closest ancestor of ``header`` that contains a button.
+
+    A modal's dismiss button sits beside its heading, so this keeps the click
+    inside the interstitial instead of anywhere on the page.
+    """
+    try:
+        container = header.locator("xpath=ancestor::*[.//button][1]")
+        if container.count() > 0:
+            return container.first
+    except Exception as exc:
+        log.debug("Could not scope %r to its own container: %s", header, exc)
+    return page

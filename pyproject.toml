@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "phantadex"
+dynamic = ["version"]
+description = "Course traversal, mapping, and archival through an authenticated Chrome session"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = ["playwright>=1.40,<2", "plyer>=2,<3", "PyYAML>=6,<7"]
+
+[project.scripts]
+phantadex = "phantadex.cli:main"
+pdex = "phantadex.cli:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "phantadex.__version__"}
+
+[tool.setuptools.packages.find]
+include = ["phantadex*"]
+
+[tool.setuptools.package-data]
+phantadex = ["config.yaml"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py38"
+
+[tool.ruff.lint]
+# Blind excepts are deliberate at every Playwright boundary: the driver raises a
+# wide, version-dependent set of errors and a missed element must degrade to the
+# next selector rather than end the run.
+select = ["E", "F", "W", "I"]

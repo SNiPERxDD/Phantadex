@@ -1,9 +1,0 @@
-course_metadata:
-  course_name: a[title*='Home Page']
-  module_name: button.cds-AccordionHeader-button[aria-expanded='true'] span
-content:
-  reading_body: div.rc-CML
-navigation:
-  next_item: button[aria-label='Go to next item']
-  mark_complete: button[data-testid='mark-complete']
-  completed_stamp: a[aria-label*='Completed']
