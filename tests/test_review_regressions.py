@@ -78,14 +78,42 @@ class ExactDeduplicationTests(unittest.TestCase):
 
 class VideoThresholdTests(unittest.TestCase):
     def test_a_low_threshold_is_rejected_only_when_out_of_range(self):
-        self.assertEqual(config.parse_video_threshold("50"), 50.0)
-        self.assertEqual(config.parse_video_threshold(0), 0.0)
-        self.assertEqual(config.parse_video_threshold(100), 100.0)
+        self.assertEqual(config.parse_video_threshold("50"), (50.0, 50.0))
+        self.assertEqual(config.parse_video_threshold(0), (0.0, 0.0))
+        self.assertEqual(config.parse_video_threshold(100), (100.0, 100.0))
+
+    def test_a_range_is_kept_as_its_two_bounds(self):
+        self.assertEqual(config.parse_video_threshold("98-100"), (98.0, 100.0))
+        self.assertEqual(config.parse_video_threshold("97.5-99%"), (97.5, 99.0))
 
     def test_out_of_range_thresholds_are_rejected_at_parse_time(self):
-        for value in ("-1", "101", "abc"):
+        for value in ("-1", "101", "abc", "99-101", "100-98", "98-", "98-99-100"):
             with self.assertRaises(argparse.ArgumentTypeError, msg=value):
                 config.parse_video_threshold(value)
+
+    def test_the_target_is_sampled_from_the_configured_range(self):
+        settings = config.Settings(video_completion_threshold=(98.0, 100.0))
+        ctx = handlers.Context(settings=settings)
+        page = FakePage(url=ITEM_A)
+        snapshot = {"paused": False, "ended": False, "duration": 100.0, "currentTime": 99.0}
+        with (
+            mock.patch.object(handlers.video, "state", return_value=dict(snapshot)),
+            mock.patch.object(handlers.modals, "dismiss_all"),
+            mock.patch.object(handlers.time, "sleep"),
+            mock.patch.object(handlers.random, "uniform", return_value=98.6) as uniform,
+        ):
+            handlers.VideoHandler()._watch(page, ctx, ITEM_A)
+
+        # 99% clears a 98.6% target, so one snapshot is enough. The bounds
+        # reaching `uniform` are what proves the range was the source.
+        uniform.assert_any_call(98.0, 100.0)
+
+    def test_a_scalar_threshold_is_held_as_a_range_of_zero_width(self):
+        # Callers that construct Settings directly, and anyone passing a single
+        # number on the command line, must still land on exactly that value.
+        self.assertEqual(
+            config.Settings(video_completion_threshold=95).video_completion_threshold, (95.0, 95.0)
+        )
 
     def test_the_configured_threshold_is_the_watch_target(self):
         # The target used to be max(threshold, uniform(97, 100)), which made

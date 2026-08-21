@@ -13,8 +13,10 @@
   `CTRL_C_EVENT` and interrupts the caller's own console group; the Win32
   handle is read instead.
 - Watch plays videos through by default (`--skip` restores the seek into
-  `97.5-98.5%`) and its completion target is 98%. `pdex skip` still always
-  seeks.
+  `97.5-98.5%`), and its completion target is sampled once per video from
+  `--video-threshold`, which defaults to `98-100`. `Settings` normalises a bare
+  number into a range of zero width, so callers passing a scalar still work.
+  `pdex skip` still always seeks.
 - `python -m phantadex` provides the same interface. The root Watch and Archive
   scripts remain compatibility wrappers.
 - Runtime output names Phantadex Watch, Archive, Dex, and Link.

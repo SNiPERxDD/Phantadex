@@ -6,7 +6,7 @@ from dataclasses import dataclass
 CDP_URL = "http://localhost:9222"
 TRANSCRIPT_DIR = "phantadex_archive"
 DEFAULT_VIDEO_SKIP_RANGE = "97.5-98.5%"
-DEFAULT_VIDEO_THRESHOLD = 98.0
+DEFAULT_VIDEO_THRESHOLD = (98.0, 100.0)
 DEFAULT_READING_MINUTES = (7, 12)
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 
@@ -19,8 +19,10 @@ class Settings:
     transcript_dir: str = TRANSCRIPT_DIR
     log_level: str = "INFO"
 
-    # Fraction of a video that must elapse before advancing (percent).
-    video_completion_threshold: float = DEFAULT_VIDEO_THRESHOLD
+    # Fraction of a video that must elapse before advancing, as a ``(min, max)``
+    # percent range sampled once per video. A single number is accepted too and
+    # is held as a range of zero width.
+    video_completion_threshold: tuple = DEFAULT_VIDEO_THRESHOLD
     # Optional pre-watch seek, e.g. "97.5-98.5%" or "00:30-01:15". Empty disables.
     # Off by default: a run plays the video through, and seeking to the end of
     # one is opt-in through --skip.
@@ -44,14 +46,20 @@ class Settings:
     paused_iterations_before_resume: int = 30
     completion_prompt_timeout: int = 30
 
+    def __post_init__(self):
+        """Normalises a scalar completion threshold into a range."""
+        self.video_completion_threshold = threshold_bounds(self.video_completion_threshold)
+
     def describe(self):
         """Returns a short human-readable summary of the active settings."""
         seek = self.video_skip_range or "disabled"
+        low, high = self.video_completion_threshold
+        threshold = f"{low:g}" if low == high else f"{low:g}-{high:g}"
         reading = "-".join(str(value) for value in self.reading_default_minutes)
         graded = "pause" if self.pause_on_graded else "skip"
         start = "first-unfinished" if self.resume_at_incomplete else "here"
         return (
-            f"threshold={self.video_completion_threshold}% seek={seek} reading={reading}m "
+            f"threshold={threshold}% seek={seek} reading={reading}m "
             f"start={start} "
             f"graded={graded} log={self.log_level}"
         )
@@ -156,9 +164,10 @@ def add_automation_args(parser):
         "--video-threshold",
         type=parse_video_threshold,
         default=DEFAULT_VIDEO_THRESHOLD,
+        metavar="MIN[-MAX]",
         help=(
-            "Percent of a video that must elapse before advancing "
-            f"(default: {DEFAULT_VIDEO_THRESHOLD:g})."
+            "Percent of a video that must elapse before advancing, fixed (`95`) "
+            "or a range sampled once per video (`98-100`, the default)."
         ),
     )
     parser.add_argument(
@@ -187,18 +196,40 @@ def resolve_skip_range(args):
 
 
 def parse_video_threshold(value):
-    """Parses a completion percentage, rejecting values outside 0-100.
+    """Parses a completion percentage or ``MIN-MAX`` range, rejecting 0-100 breaches.
 
-    Unvalidated values were silently unreachable: above 100 the target could
-    only be met by the player's ``ended`` state, and negatives were masked.
+    Returns a ``(min, max)`` pair; a single number gives a range of zero width.
+    Values outside 0-100 are unreachable rather than merely odd: above 100 the
+    target can only be met by the player's ``ended`` state, and negatives are
+    met by the first frame.
     """
+    text = str(value).strip().rstrip("%")
+    parts = text.split("-")
+    if len(parts) not in (1, 2) or not all(part.strip() for part in parts):
+        raise argparse.ArgumentTypeError("use MIN or MIN-MAX, for example 98-100")
     try:
-        percent = float(value)
+        minimum, maximum = float(parts[0]), float(parts[-1])
     except (TypeError, ValueError) as exc:
         raise argparse.ArgumentTypeError("threshold must be a number") from exc
-    if not 0.0 <= percent <= 100.0:
+    if not 0.0 <= minimum <= 100.0 or not 0.0 <= maximum <= 100.0:
         raise argparse.ArgumentTypeError("threshold must be between 0 and 100")
-    return percent
+    if maximum < minimum:
+        raise argparse.ArgumentTypeError("threshold range must be ordered, for example 98-100")
+    return minimum, maximum
+
+
+def threshold_bounds(value):
+    """Returns a completion threshold as a ``(min, max)`` pair.
+
+    Accepts what ``Settings`` may be handed directly -- a bare number, or a pair
+    already parsed from the command line -- so the watch loop never has to ask
+    which of the two it was given.
+    """
+    if isinstance(value, (tuple, list)):
+        low, high = (float(bound) for bound in value)
+        return (low, high) if low <= high else (high, low)
+    percent = float(value)
+    return percent, percent
 
 
 def parse_reading_minutes(value):

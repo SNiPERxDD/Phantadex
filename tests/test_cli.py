@@ -153,8 +153,20 @@ class PackageCliTests(unittest.TestCase):
         settings = self._watch_settings()
 
         self.assertEqual(settings.video_skip_range, "")
-        self.assertEqual(settings.video_completion_threshold, 98.0)
+        self.assertEqual(settings.video_completion_threshold, (98.0, 100.0))
         self.assertEqual(settings.reading_default_minutes, (7, 12))
+
+    def test_watch_accepts_a_threshold_range(self):
+        settings = self._watch_settings("--video-threshold", "90-95")
+
+        self.assertEqual(settings.video_completion_threshold, (90.0, 95.0))
+        self.assertIn("threshold=90-95%", settings.describe())
+
+    def test_watch_accepts_a_fixed_threshold(self):
+        settings = self._watch_settings("--video-threshold", "95")
+
+        self.assertEqual(settings.video_completion_threshold, (95.0, 95.0))
+        self.assertIn("threshold=95%", settings.describe())
 
     def test_watch_skip_flag_turns_the_seek_on(self):
         settings = self._watch_settings("--skip")

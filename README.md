@@ -274,10 +274,10 @@ source. Both entry points share the connection flags:
 *   `--no-video-skip` — force the seek off. This is the default; the flag is
     kept because it used to be the only way to ask for it, and it overrides
     `--skip`.
-*   `--video-threshold` — percent of a video that must elapse before advancing,
-    between `0` and `100` (default `98`). This value is the target; when
-    `--skip` is on, playback variation comes from `--video-skip-range`, which is
-    randomized by design.
+*   `--video-threshold MIN[-MAX]` — percent of a video that must elapse before
+    advancing, between `0` and `100`. Fixed (`95`) or a range sampled once per
+    video (`98-100`, the default), so two runs of the same video do not advance
+    at the same instant.
 *   `--reading-minutes MIN[-MAX]` — fallback reading dwell in whole minutes,
     either fixed (`5`) or randomized (`7-12`, the default).
 *   `--pause-on-graded` — stop on a graded quiz or peer assignment and wait for

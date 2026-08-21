@@ -165,11 +165,13 @@ class VideoHandler(BaseHandler):
             duration = snapshot["duration"]
             if duration > 0:
                 if target is None:
-                    # The configured threshold is the target. It used to be the
-                    # floor of a random 97-100% band, which made every value
-                    # below ~97 silently inoperative. Playback variation comes
-                    # from --video-skip-range, which is randomised by design.
-                    target = min(100.0, float(ctx.settings.video_completion_threshold))
+                    # Sampled once per video, from the configured range. The
+                    # target used to be the floor of a fixed random 97-100%
+                    # band, which made every configured value below ~97
+                    # silently inoperative; the band is now the setting itself,
+                    # and a single number narrows it to exactly that value.
+                    low, high = ctx.settings.video_completion_threshold
+                    target = round(min(100.0, random.uniform(low, high)), 1)
                 percent = (snapshot["currentTime"] / duration) * 100
                 logs.bar(
                     percent / 100,
