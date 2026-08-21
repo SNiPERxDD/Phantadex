@@ -17,6 +17,7 @@ PLUGIN = "PLUGIN"
 READING = "READING"
 DISCUSSION = "DISCUSSION"
 SURVEY = "SURVEY"
+DIALOGUE = "DIALOGUE"
 UNKNOWN = "UNKNOWN"
 
 # Coursera routes each item type through its own URL path segment. The segment
@@ -37,10 +38,11 @@ URL_SEGMENT_LABELS = {
     "ungradedWidget": LAB,
     "ungradedLti": LAB,
     "ungradedLab": LAB,
-    # Coursera's AI roleplay practice ("Practice: ...", subtext "Dialogue").
-    # Ungraded, and interactive rather than readable, so it is treated as the
-    # other ungraded widgets are rather than being archived as content.
-    "coach": LAB,
+    # Coursera's AI roleplay practice ("Practice: ...", subtext "Dialogue"). It
+    # is ungraded like the widgets above, but it is driven rather than dwelled
+    # on -- a dialogue has to be started and then explicitly ended before the
+    # item counts as complete -- so it keeps its own label and handler.
+    "coach": DIALOGUE,
     "quiz": QUIZ,
     "exam": QUIZ,
     "assignment": ASSIGNMENT,

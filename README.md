@@ -43,6 +43,9 @@ Product vocabulary:
     *   **Discussion:** Archives the prompt and advances. No reply is composed
         or submitted.
     *   **Plugins / LTI:** Detected and stepped over.
+    *   **Dialogue:** Coursera's AI roleplay practice. Opened, then closed and
+        the closing confirmed, which is what marks the item complete. The
+        conversation itself is not held up or archived.
     *   **Graded work:** Detected, named in the log and stepped past, so one
         graded item cannot stall the whole run. `--pause-on-graded` waits for
         you instead (see §8).
@@ -388,6 +391,10 @@ python run_tests.py --live   # additionally probe a running Chrome session
 *   **Surveys:** An item whose title names a questionnaire about the learner is
     stepped past without dwelling, archiving or answering. The marker is a full
     phrase, so a reading about surveys is still treated as course content.
+*   **Ledger Size:** A reading can embed a PDF viewer whose rendered text runs
+    to book length. The `.txt` file beside the ledger is the archive and keeps
+    all of it; the ledger keeps an excerpt cut on a line break, followed by the
+    character count and the name of the file holding the rest.
 *   **Modals:** Interstitials are cleared through controls that decline them,
     matched by visible text or `aria-label` so an icon-only close button counts.
     The demographics survey is skipped rather than submitted, since submitting

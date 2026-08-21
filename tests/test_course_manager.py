@@ -148,6 +148,57 @@ class FilenameTests(CourseManagerTestCase):
 
 
 class SaveContentTests(CourseManagerTestCase):
+    def _stored_content(self, url):
+        """Returns the ledger's copy of one item's content."""
+        root = ET.parse(self.manager.xml_path).getroot()
+        return root.find(f".//item[@url='{url}']").findtext("content")
+
+    def test_an_oversized_reading_is_cut_short_in_the_ledger_only(self):
+        # A supplement can embed a PDF viewer whose rendered text runs to book
+        # length. The file on disk is the archive and keeps all of it; the
+        # ledger is an index, so it keeps a bounded excerpt and a pointer.
+        limit = course_manager_module.MAX_LEDGER_CONTENT_CHARS
+        body = "\n".join(f"line {number}" for number in range(limit))
+        filename, ledger_ok = self.manager.save_content(
+            "/learn/demo/supplement/bbb/syllabus", body, "Reading"
+        )
+        self.assertTrue(ledger_ok)
+
+        with open(os.path.join(self.manager.root_dir, filename)) as handle:
+            self.assertEqual(handle.read(), body)
+
+        stored = self._stored_content("/learn/demo/supplement/bbb/syllabus")
+        self.assertLess(len(stored), limit + 200)
+        self.assertTrue(stored.startswith("line 0\n"))
+        self.assertIn(f"Truncated at {limit} characters of {len(body)}", stored)
+        self.assertIn(filename, stored)
+
+    def test_a_reading_inside_the_limit_is_stored_whole(self):
+        body = "a" * course_manager_module.MAX_LEDGER_CONTENT_CHARS
+        self.manager.save_content("/learn/demo/supplement/bbb/syllabus", body, "Reading")
+        stored = self._stored_content("/learn/demo/supplement/bbb/syllabus")
+        self.assertEqual(stored, body)
+
+    def test_an_oversized_adopted_item_is_cut_short_too(self):
+        limit = course_manager_module.MAX_LEDGER_CONTENT_CHARS
+        body = "\n".join(f"line {number}" for number in range(limit))
+        self.manager.save_content("/learn/demo/supplement/eee/unlisted", body, "Reading")
+        adopted = (
+            ET.parse(self.manager.xml_path)
+            .getroot()
+            .find(".//item[@url='/learn/demo/supplement/eee/unlisted']")
+        )
+        self.assertIn("Truncated at", adopted.findtext("content"))
+
+    def test_a_cut_excerpt_ends_on_a_whole_line(self):
+        limit = course_manager_module.MAX_LEDGER_CONTENT_CHARS
+        body = ("word " * 40 + "\n") * (limit // 200)
+        self.manager.save_content("/learn/demo/supplement/bbb/syllabus", body, "Reading")
+        stored = self._stored_content("/learn/demo/supplement/bbb/syllabus")
+        excerpt = stored.split("\n\n[Truncated")[0]
+        self.assertTrue(body.startswith(excerpt))
+        self.assertTrue(excerpt.endswith("word"))
+
     def test_writes_file_and_updates_ledger(self):
         filename, ledger_ok = self.manager.save_content(
             "https://www.coursera.org/learn/demo/lecture/aaa/welcome",

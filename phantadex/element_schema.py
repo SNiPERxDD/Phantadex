@@ -97,6 +97,39 @@ ELEMENTS_SCHEMA = {
             "description": "Main reading text container",
         }
     },
+    # Controls of an AI roleplay practice item, served under the /coach/ segment.
+    # The item is only marked complete once a started dialogue has been ended
+    # and the ending confirmed, so each step of that sequence is addressed here.
+    "dialogue": {
+        "start": {
+            "selectors": [
+                "button:has-text('Start Dialogue')",
+                "button[aria-label='Start Dialogue']",
+            ],
+            "description": "Control that opens a roleplay dialogue",
+        },
+        "end": {
+            "selectors": [
+                "button[aria-label='End Dialogue']",
+                "button:has-text('End Dialogue')",
+            ],
+            "description": "Control that closes a running roleplay dialogue",
+        },
+        "confirm_end": {
+            "selectors": [
+                "[role='dialog'] button:has-text('Yes, end the Dialogue')",
+                "button:has-text('Yes, end the Dialogue')",
+            ],
+            "description": "Confirmation in the 'end this session?' prompt",
+        },
+        "finished": {
+            "selectors": [
+                "button:has-text('Try again')",
+                "button[aria-label='Try again']",
+            ],
+            "description": "Retry control shown once a dialogue has ended",
+        },
+    },
     "navigation": {
         "next_item": {
             "selectors": [

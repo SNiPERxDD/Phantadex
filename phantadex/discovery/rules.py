@@ -92,7 +92,7 @@ SUBTEXT_TYPES = (
     ("plugin", "LAB"),
     ("lab", "LAB"),
     # Subtext of an AI roleplay practice item, served under the /coach/ segment.
-    ("dialogue", "LAB"),
+    ("dialogue", "DIALOGUE"),
     ("discussion", "DISCUSSION"),
 )
 

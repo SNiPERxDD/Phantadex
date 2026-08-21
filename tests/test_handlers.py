@@ -31,6 +31,7 @@ class DispatchTests(unittest.TestCase):
             detection.ASSIGNMENT: handlers.AssignmentHandler,
             detection.DISCUSSION: handlers.DiscussionHandler,
             detection.SURVEY: handlers.SurveyHandler,
+            detection.DIALOGUE: handlers.DialogueHandler,
         }
         for page_type, cls in expected.items():
             self.assertIsInstance(handlers.for_page_type(page_type), cls, page_type)
@@ -181,6 +182,95 @@ class HandlerBehaviourTests(unittest.TestCase):
         mark.assert_not_called()
         self.advance.assert_not_called()
         self.assertEqual(result, handlers.CONTINUE)
+
+
+class DialogueHandlerTests(unittest.TestCase):
+    """The start/end/confirm sequence a roleplay item needs to count."""
+
+    def setUp(self):
+        self.ctx = handlers.Context(settings=config.Settings())
+        self.ctx.manager = FakeManager()
+        self.page = FakePage(url="https://www.coursera.org/learn/c/coach/gMS8D/practice-a-mix")
+        patcher = mock.patch.object(handlers.navigation, "advance", return_value="NAVIGATED")
+        self.advance = patcher.start()
+        self.addCleanup(patcher.stop)
+        sleeper = mock.patch.object(handlers.time, "sleep")
+        sleeper.start()
+        self.addCleanup(sleeper.stop)
+
+    @staticmethod
+    def _controls(present, appears_after=None):
+        """Returns a ``first_visible`` stand-in and the click log it records.
+
+        ``present`` names the controls the item has at all; ``appears_after``
+        maps one onto the click that reveals it, which is how the live page
+        behaves -- ``End Dialogue`` replaces ``Start Dialogue`` only once the
+        dialogue is open, and ``Try again`` appears only once it is confirmed
+        closed. A fixture that showed them all at once would let a handler
+        that skipped a step pass.
+        """
+        clicked = []
+        appears_after = appears_after or {}
+
+        def first_visible(_page, category, element):
+            if category != "dialogue" or element not in present:
+                return None
+            precondition = appears_after.get(element)
+            if precondition is not None and precondition not in clicked:
+                return None
+            control = FakeLocator(count=1)
+            control.click = mock.Mock(side_effect=lambda: clicked.append(element))
+            return control
+
+        return first_visible, clicked
+
+    # How the live page reveals each control, in sequence.
+    SEQUENCE = {"end": "start", "confirm_end": "end", "finished": "confirm_end"}
+
+    def test_a_fresh_dialogue_is_started_ended_and_confirmed(self):
+        first_visible, clicked = self._controls(
+            {"start", "end", "confirm_end", "finished"}, self.SEQUENCE
+        )
+        with mock.patch.object(handlers.schema, "first_visible", side_effect=first_visible):
+            result = handlers.DialogueHandler().handle(self.page, self.ctx)
+        self.assertEqual(clicked, ["start", "end", "confirm_end"])
+        self.advance.assert_called_once()
+        self.assertEqual(result, handlers.CONTINUE)
+
+    def test_an_already_ended_dialogue_is_stepped_past_untouched(self):
+        first_visible, clicked = self._controls({"finished"})
+        with mock.patch.object(handlers.schema, "first_visible", side_effect=first_visible):
+            handlers.DialogueHandler().handle(self.page, self.ctx)
+        self.assertEqual(clicked, [])
+        self.advance.assert_called_once()
+
+    def test_a_dialogue_left_running_is_ended_without_being_restarted(self):
+        # No ``Start`` control survives once a dialogue is open, and polling for
+        # one there would stall the item for the length of the retry budget.
+        first_visible, clicked = self._controls(
+            {"end", "confirm_end", "finished"}, {"confirm_end": "end", "finished": "confirm_end"}
+        )
+        with mock.patch.object(handlers.schema, "first_visible", side_effect=first_visible):
+            handlers.DialogueHandler().handle(self.page, self.ctx)
+        self.assertEqual(clicked, ["end", "confirm_end"])
+
+    def test_a_dialogue_that_never_confirms_still_advances(self):
+        # Leaving the run parked on an item it cannot finish is worse than
+        # moving on: the sidebar keeps the item, and the next pass retries it.
+        first_visible, clicked = self._controls({"start", "end"}, {"end": "start"})
+        with mock.patch.object(handlers.schema, "first_visible", side_effect=first_visible):
+            result = handlers.DialogueHandler().handle(self.page, self.ctx)
+        self.assertEqual(clicked, ["start", "end"])
+        self.advance.assert_called_once()
+        self.assertEqual(result, handlers.CONTINUE)
+
+    def test_nothing_is_archived_from_a_dialogue(self):
+        first_visible, _clicked = self._controls(
+            {"start", "end", "confirm_end", "finished"}, self.SEQUENCE
+        )
+        with mock.patch.object(handlers.schema, "first_visible", side_effect=first_visible):
+            handlers.DialogueHandler().handle(self.page, self.ctx)
+        self.assertEqual(self.ctx.manager.saved, [])
 
 
 if __name__ == "__main__":

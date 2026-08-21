@@ -23,6 +23,14 @@ UNRESOLVED_MODULE = "Unknown_Module"
 LOCK_TIMEOUT_SECONDS = 30
 LOCK_POLL_SECONDS = 0.05
 LEGACY_TRANSCRIPT_DIR = "coursera_transcripts"
+# The ledger indexes what was archived; the archive itself is the ``.txt`` file
+# written beside it, which is never truncated. A supplement can embed a PDF
+# viewer whose rendered text runs to book length, and storing that inline turns
+# the ledger into something slow to parse and impossible to read, so the copy
+# the ledger keeps is bounded. The limit sits well above a long reading -- the
+# longest seen so far is under 20,000 characters -- so ordinary content is
+# stored whole and only outliers are cut.
+MAX_LEDGER_CONTENT_CHARS = 40000
 
 
 class CourseManager:
@@ -237,11 +245,12 @@ class CourseManager:
             written_path = storage.save_versioned(
                 os.path.join(self.root_dir, filename), content_text
             )
-            return os.path.basename(written_path), self._update_ledger(
-                current_url, content_text, content_type
+            written_name = os.path.basename(written_path)
+            return written_name, self._update_ledger(
+                current_url, content_text, content_type, written_name
             )
 
-    def _update_ledger(self, current_url, content_text, content_type):
+    def _update_ledger(self, current_url, content_text, content_type, filename):
         """Stores content against the matching ledger item. Returns success."""
         tree = self._read_tree()
         if tree is None:
@@ -254,7 +263,7 @@ class CourseManager:
             content_node = item.find("content")
             if content_node is None:
                 content_node = ET.SubElement(item, "content")
-            content_node.text = content_text
+            content_node.text = _bounded_content(content_text, filename)
             if item.get("status") == "failed":
                 for attribute in ("status", "failure_reason", "failed_at"):
                     item.attrib.pop(attribute, None)
@@ -265,9 +274,9 @@ class CourseManager:
                 log.error("Could not write ledger %s: %s", self.xml_path, exc)
                 return False
 
-        return self._adopt_item(tree, current_url, content_text, content_type)
+        return self._adopt_item(tree, current_url, content_text, content_type, filename)
 
-    def _adopt_item(self, tree, current_url, content_text, content_type):
+    def _adopt_item(self, tree, current_url, content_text, content_type, filename):
         """Adds a ledger entry for an archived item the ledger did not list.
 
         The sidebar row's type and the live page's own classification can
@@ -299,7 +308,7 @@ class CourseManager:
         item_node.set("title", title)
         item_node.set("type", item_type)
         item_node.set("url", urls.normalize_path(current_url))
-        ET.SubElement(item_node, "content").text = content_text
+        ET.SubElement(item_node, "content").text = _bounded_content(content_text, filename)
 
         try:
             self._write_tree(tree)
@@ -422,6 +431,28 @@ class CourseManager:
                 return None
         log.debug("Current URL %s not found in course map", current_url)
         return None
+
+
+def _bounded_content(content_text, filename):
+    """Returns the ledger's copy of archived text, cut to a readable length.
+
+    Text past :data:`MAX_LEDGER_CONTENT_CHARS` is dropped and replaced with a
+    pointer to the file that holds all of it. The cut lands on the last line
+    break inside the budget when there is one, so the stored excerpt ends on a
+    whole line rather than mid-sentence.
+    """
+    text = content_text or ""
+    if len(text) <= MAX_LEDGER_CONTENT_CHARS:
+        return text
+    excerpt = text[:MAX_LEDGER_CONTENT_CHARS]
+    break_at = excerpt.rfind("\n")
+    if break_at > 0:
+        excerpt = excerpt[:break_at]
+    return (
+        f"{excerpt.rstrip()}\n\n"
+        f"[Truncated at {MAX_LEDGER_CONTENT_CHARS} characters of {len(text)}. "
+        f"The full text is in {filename}.]"
+    )
 
 
 def _title_from_url(current_url):

@@ -36,6 +36,12 @@ FROZEN_TICK_LIMIT = 90
 POST_TARGET_DWELL_RANGE = (2.0, 4.0)
 # Sub-minute dwell for an external resource that only needs its box ticked.
 PLUGIN_DWELL_MINUTES = 0.5
+# Pause between opening a roleplay dialogue and ending it, so the item is not
+# started and closed in the same instant.
+DIALOGUE_DWELL_RANGE = (4.0, 8.0)
+# Each dialogue control renders in response to the previous click rather than
+# with the page, so a control is polled for rather than expected to be present.
+DIALOGUE_CONTROL_ATTEMPTS = 10
 # A graded quiz counts as cleared only after this many consecutive absent
 # readings, so markup that has not rendered on the first check is not mistaken
 # for a finished attempt.
@@ -365,6 +371,73 @@ class DiscussionHandler(BaseHandler):
         return self.advance(page, ctx, start_url)
 
 
+class DialogueHandler(BaseHandler):
+    """Completes an AI roleplay practice item.
+
+    Coursera marks one of these complete only once a dialogue has been opened
+    and then explicitly closed: ``Start Dialogue``, ``End Dialogue``, and the
+    ``Yes, end the Dialogue`` confirmation in the prompt that follows. A
+    ``Try again`` control appearing in place of the transcript is the page's
+    own signal that the sequence landed. Nothing is archived -- the content is
+    a conversation the run does not hold up its end of.
+    """
+
+    page_type = detection.DIALOGUE
+    content_type = None
+
+    def handle(self, page, ctx):
+        ctx.announce("dialogue", "roleplay dialogue")
+        start_url = page.url
+
+        if self._control(page, "finished") is not None:
+            logs.step("already ended; stepping past it")
+            return self.advance(page, ctx, start_url)
+
+        # A dialogue an earlier run left open has no ``Start`` control any more;
+        # the end sequence below picks it up from wherever it already is.
+        if self._control(page, "end") is None and self._click(page, "start"):
+            logs.step("dialogue started")
+            time.sleep(jitter.duration(*DIALOGUE_DWELL_RANGE))
+
+        if self._end(page):
+            logs.ok("dialogue ended")
+        else:
+            logs.warn("Dialogue did not end; leaving it as it is.")
+        return self.advance(page, ctx, start_url)
+
+    def _end(self, page):
+        """Ends a running dialogue and confirms it. Reports whether it finished."""
+        if not self._click(page, "end"):
+            return False
+        if not self._click(page, "confirm_end"):
+            return False
+        for _ in range(DIALOGUE_CONTROL_ATTEMPTS):
+            if self._control(page, "finished") is not None:
+                return True
+            time.sleep(1)
+        return False
+
+    @staticmethod
+    def _control(page, element):
+        """Returns the named dialogue control if it is on screen, else ``None``."""
+        return schema.first_visible(page, "dialogue", element)
+
+    @classmethod
+    def _click(cls, page, element):
+        """Clicks a dialogue control once it appears. Reports whether it was clicked."""
+        for attempt in range(DIALOGUE_CONTROL_ATTEMPTS):
+            control = cls._control(page, element)
+            if control is not None:
+                try:
+                    control.click()
+                    return True
+                except Exception as exc:
+                    log.debug("Dialogue control %r click failed: %s", element, exc)
+            if attempt + 1 < DIALOGUE_CONTROL_ATTEMPTS:
+                time.sleep(1)
+        return False
+
+
 def _notify(title, message):
     """Best-effort desktop notification; never fatal."""
     try:
@@ -385,6 +458,7 @@ HANDLERS = {
         AssignmentHandler(),
         DiscussionHandler(),
         SurveyHandler(),
+        DialogueHandler(),
     )
 }
 

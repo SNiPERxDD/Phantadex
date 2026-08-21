@@ -128,6 +128,25 @@
   traversal defects). The review fixes above are uncommitted at the time of
   writing; nothing has been pushed.
 
+- Coursera's AI roleplay practice (`/coach/`, row subtext "Dialogue") has its
+  own `DIALOGUE` type and `DialogueHandler`. It is deliberately *not* folded in
+  with the ungraded widgets: a widget only needs its box ticked, but Coursera
+  marks a dialogue complete only after `Start Dialogue`, `End Dialogue`, and
+  the `Yes, end the Dialogue` confirmation in the prompt that follows. The
+  `Try again` control appearing in place of the transcript is the page's own
+  signal that the sequence landed, and is what `dialogue.finished` matches.
+  Each control renders in response to the previous click rather than with the
+  page, so each is polled for. A dialogue an earlier run left open has no
+  `Start` control any more, so the handler checks for `End` before polling for
+  `Start` -- without that check a resumed dialogue burns the whole retry budget
+  waiting for a control that will never appear.
+- The ledger stores at most `course_manager.MAX_LEDGER_CONTENT_CHARS` (40,000)
+  characters per item. The `.txt` file beside it is the archive and is always
+  written in full -- do not move the cap into `page_ops.extract_reading`, which
+  would truncate the archive itself. The cause is that a supplement can embed a
+  PDF viewer whose rendered text flows straight into `content.reading_body`, so
+  a book-length PDF was already being extracted and stored inline.
+
 ## Start here
 
 ```bash
@@ -165,6 +184,9 @@ course mapping and selector-discovery orchestration.
 - The live Next steps reading exposed Mark as completed. The shared completion
   action removed the button and changed its sidebar row from Not submitted to
   Completed. Dex then reported 11 completed and 24 incomplete rows.
+- The dialogue sequence was run against a live roleplay item through
+  `DialogueHandler.handle`: it classified as `DIALOGUE`, completed in about ten
+  seconds, and the sidebar row moved from "Not submitted" to "Completed".
 - All six mapped `ungradedWidget` routes retained their target URL during a
   direct-navigation probe. Their empty panes already take the existing plugin
   skip path.

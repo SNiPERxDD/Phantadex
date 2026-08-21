@@ -574,12 +574,14 @@ class RowTextTests(unittest.TestCase):
 class CoachPracticeTests(unittest.TestCase):
     """Coursera's AI roleplay practice item, served under ``/coach/``."""
 
-    def test_a_dialogue_row_is_classified_as_an_ungraded_widget(self):
+    def test_a_dialogue_row_keeps_its_own_type(self):
+        # Not folded in with the ungraded widgets: a dialogue has to be opened
+        # and then closed before it counts, which no widget needs.
         self.assertEqual(
             discovery.classify_sidebar_row(
                 "dialogue", "", "/learn/c/coach/gMS8D/practice-balance-a-marketing-mix"
             ),
-            "LAB",
+            "DIALOGUE",
         )
 
     def test_a_coach_item_is_recognised_from_its_segment_alone(self):
@@ -587,6 +589,13 @@ class CoachPracticeTests(unittest.TestCase):
         # other than UNKNOWN, which made every schema category get tried.
         self.assertEqual(
             discovery.classify_sidebar_row("", "", "/learn/c/coach/gMS8D/practice"),
+            "DIALOGUE",
+        )
+
+    def test_an_ungraded_widget_is_still_its_own_type(self):
+        # Pulling dialogues out must not have moved the widgets with them.
+        self.assertEqual(
+            discovery.classify_sidebar_row("ungraded plugin", "", "/learn/c/ungradedWidget/x/y"),
             "LAB",
         )
 

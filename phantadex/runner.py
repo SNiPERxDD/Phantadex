@@ -25,7 +25,12 @@ from .session import BrowserSession
 
 log = logs.get_logger("runner")
 
-PROMPTED_TYPES = (detection.READING, detection.PLUGIN, detection.DISCUSSION)
+PROMPTED_TYPES = (
+    detection.READING,
+    detection.PLUGIN,
+    detection.DISCUSSION,
+    detection.DIALOGUE,
+)
 
 # Item types whose text is archived before the runner skips past them. Both
 # extract through ``page_ops.extract_reading``; only the ledger label differs.
