@@ -26,7 +26,7 @@
   `status="failed"` so a giving-up skip is not indistinguishable from success. Every automated UI click now uses the shared pointer-move,
   hover, randomized-reaction, and click path.
 - The Chrome launcher supports macOS and Windows, dependencies have compatible
-  bounds, and CI covers Python 3.8/3.12 on both platforms.
+  bounds, and CI covers Python 3.11/3.13 on Linux, Windows and macOS.
 - Watch accepts `--reading-minutes MIN[-MAX]` for a fixed or randomized fallback
   when an item exposes no reading duration; the active range is shown at startup.
 - Dex marks every mapped row as completed (`✓`), incomplete (`○`), or unknown
@@ -130,7 +130,7 @@ course mapping and selector-discovery orchestration.
   paused there without scrolling or cycling. Ctrl+C produced one line, no
   unhandled future, and Chrome 151 remained reachable on the debug port.
 - Windows was not available locally. The Windows `msvcrt` lock branch has a
-  direct unit test; Python 3.8 syntax, shell-independent launcher invocation,
+  direct unit test; Python 3.11 syntax, shell-independent launcher invocation,
   and platform-neutral paths cover the remaining changed surface.
 - Latest gate: 349 offline tests pass; `ruff check phantadex tests` is clean
 - Packaging: the launcher moved from `scripts/start_chrome_debug.py` into
@@ -146,9 +146,10 @@ course mapping and selector-discovery orchestration.
   under the `pyproject.toml` configuration, and the wheel builds. The wheel
   contains `phantadex/config.yaml`, both console entry points, and no legacy
   package namespace.
-- CI runs a lint job plus a test matrix of Python 3.8/3.12 on Windows and macOS.
-  The 3.8 legs pin `macos-13`: `actions/setup-python` publishes no arm64 macOS
-  build of 3.8, so `macos-latest` cannot provision that interpreter.
+- CI runs a lint job plus a test matrix of Python 3.11/3.13 on Linux and
+  Windows, and 3.13 on macOS. The floor is 3.11 because 3.10 reaches end of life
+  in October 2026; raising it further means editing `requires-python`, the ruff
+  `target-version` and this matrix together.
 
 ## Verification notes
 

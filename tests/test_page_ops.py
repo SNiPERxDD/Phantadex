@@ -40,16 +40,18 @@ class ExtractTranscriptTests(unittest.TestCase):
         self.assertEqual(text, "0:05\nSome speech. More.")
 
     def test_download_fallback_runs_when_the_panel_is_empty(self):
-        with mock.patch.object(
-            page_ops, "_transcript_from_panel", return_value=None
-        ), mock.patch.object(page_ops, "_transcript_from_download", return_value="Body."):
+        with (
+            mock.patch.object(page_ops, "_transcript_from_panel", return_value=None),
+            mock.patch.object(page_ops, "_transcript_from_download", return_value="Body."),
+        ):
             text, method = page_ops.extract_transcript(self.page)
         self.assertEqual((text, method), ("Body.", "File_Download"))
 
     def test_both_stages_failing_reports_failure(self):
-        with mock.patch.object(
-            page_ops, "_transcript_from_panel", return_value=None
-        ), mock.patch.object(page_ops, "_transcript_from_download", return_value=None):
+        with (
+            mock.patch.object(page_ops, "_transcript_from_panel", return_value=None),
+            mock.patch.object(page_ops, "_transcript_from_download", return_value=None),
+        ):
             self.assertEqual(page_ops.extract_transcript(self.page), (None, "FAILED"))
 
 
@@ -78,11 +80,13 @@ class TranscriptDownloadTests(unittest.TestCase):
         tab = FakeLocator(count=1)
         link = FakeLocator(count=1)
         self.page.expect_download = lambda **_kw: FakeDownloadContext(FakeDownload(self.tmp))
-        with mock.patch.object(
-            page_ops.schema, "first_visible", return_value=tab
-        ), mock.patch.object(
-            page_ops, "_first_visible_transcript_download", side_effect=[None, link]
-        ), mock.patch.object(page_ops.time, "sleep"):
+        with (
+            mock.patch.object(page_ops.schema, "first_visible", return_value=tab),
+            mock.patch.object(
+                page_ops, "_first_visible_transcript_download", side_effect=[None, link]
+            ),
+            mock.patch.object(page_ops.time, "sleep"),
+        ):
             self.assertEqual(
                 page_ops._transcript_from_download(self.page), "Downloaded transcript body."
             )
@@ -95,11 +99,13 @@ class TranscriptDownloadTests(unittest.TestCase):
         link = FakeLocator(count=1, events=self.page.pointer_events)
         self.page.expect_download = lambda **_kw: FakeDownloadContext(FakeDownload(self.tmp))
 
-        with mock.patch.object(
-            page_ops.schema, "first_visible", return_value=tab
-        ), mock.patch.object(
-            page_ops, "_first_visible_transcript_download", side_effect=[None, link]
-        ), mock.patch("phantadex.interaction.time.sleep"):
+        with (
+            mock.patch.object(page_ops.schema, "first_visible", return_value=tab),
+            mock.patch.object(
+                page_ops, "_first_visible_transcript_download", side_effect=[None, link]
+            ),
+            mock.patch("phantadex.interaction.time.sleep"),
+        ):
             self.assertEqual(
                 page_ops._transcript_from_download(self.page), "Downloaded transcript body."
             )
@@ -113,9 +119,10 @@ class TranscriptDownloadTests(unittest.TestCase):
         self._with_link(FakeLocator(count=1))
         self.page.expect_download = lambda **_kw: FakeDownloadContext(FakeDownload(self.tmp))
 
-        with mock.patch.object(
-            page_ops.schema, "first_visible", return_value=tab
-        ), mock.patch.object(page_ops.time, "sleep"):
+        with (
+            mock.patch.object(page_ops.schema, "first_visible", return_value=tab),
+            mock.patch.object(page_ops.time, "sleep"),
+        ):
             self.assertEqual(
                 page_ops._transcript_from_download(self.page), "Downloaded transcript body."
             )
@@ -138,9 +145,12 @@ class TranscriptDownloadTests(unittest.TestCase):
         }
         self.page.expect_download = lambda **_kw: FakeDownloadContext(FakeDownload(self.tmp))
 
-        with mock.patch.object(
-            page_ops.schema, "first_visible", return_value=OpeningFilesTab(count=1)
-        ), mock.patch.object(page_ops.time, "sleep"):
+        with (
+            mock.patch.object(
+                page_ops.schema, "first_visible", return_value=OpeningFilesTab(count=1)
+            ),
+            mock.patch.object(page_ops.time, "sleep"),
+        ):
             self.assertEqual(
                 page_ops._transcript_from_download(self.page), "Downloaded transcript body."
             )
@@ -152,26 +162,29 @@ class TranscriptDownloadTests(unittest.TestCase):
         tab = FakeLocator(count=1)
         self._with_link(FakeLocator(count=1))
         self.page.expect_download = lambda **_kw: FakeDownloadContext(FakeDownload(self.tmp))
-        with mock.patch.object(
-            page_ops.schema, "first_visible", return_value=tab
-        ), mock.patch.object(page_ops.time, "sleep"):
+        with (
+            mock.patch.object(page_ops.schema, "first_visible", return_value=tab),
+            mock.patch.object(page_ops.time, "sleep"),
+        ):
             self.assertIsNone(page_ops._transcript_from_download(self.page))
 
     def test_a_missing_file_on_disk_is_not_returned(self):
         tab = FakeLocator(count=1)
         self._with_link(FakeLocator(count=1))
         self.page.expect_download = lambda **_kw: FakeDownloadContext(FakeDownload("/no/such/file"))
-        with mock.patch.object(
-            page_ops.schema, "first_visible", return_value=tab
-        ), mock.patch.object(page_ops.time, "sleep"):
+        with (
+            mock.patch.object(page_ops.schema, "first_visible", return_value=tab),
+            mock.patch.object(page_ops.time, "sleep"),
+        ):
             self.assertIsNone(page_ops._transcript_from_download(self.page))
 
     def test_an_invisible_link_is_skipped(self):
         tab = FakeLocator(count=1)
         self._with_link(FakeLocator(count=1, visible=False))
-        with mock.patch.object(
-            page_ops.schema, "first_visible", return_value=tab
-        ), mock.patch.object(page_ops.time, "sleep"):
+        with (
+            mock.patch.object(page_ops.schema, "first_visible", return_value=tab),
+            mock.patch.object(page_ops.time, "sleep"),
+        ):
             self.assertIsNone(page_ops._transcript_from_download(self.page))
 
 

@@ -231,9 +231,11 @@ class LedgerLockTests(CourseManagerTestCase):
             locking=lambda descriptor, mode, size: calls.append((descriptor, mode, size)),
         )
 
-        with tempfile.TemporaryFile("w+b") as handle, mock.patch.object(
-            course_manager_module.os, "name", "nt"
-        ), mock.patch.dict(sys.modules, {"msvcrt": fake_msvcrt}):
+        with (
+            tempfile.TemporaryFile("w+b") as handle,
+            mock.patch.object(course_manager_module.os, "name", "nt"),
+            mock.patch.dict(sys.modules, {"msvcrt": fake_msvcrt}),
+        ):
             course_manager_module._lock_file(handle)
             course_manager_module._unlock_file(handle)
 

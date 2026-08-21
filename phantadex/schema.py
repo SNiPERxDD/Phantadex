@@ -69,7 +69,7 @@ def _read_yaml_mapping(path):
     try:
         import yaml
 
-        with open(path, "r") as handle:
+        with open(path, encoding="utf-8") as handle:
             loaded = yaml.safe_load(handle) or {}
         return loaded if isinstance(loaded, dict) else {}
     except FileNotFoundError:

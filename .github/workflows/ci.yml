@@ -11,7 +11,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.13'
       - run: python -m pip install --upgrade pip ruff
       - run: ruff check phantadex tests scripts
       - run: ruff format --check phantadex tests scripts
@@ -21,22 +21,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # The floor of requires-python is exercised on Linux and Windows.
-          # It used to run on macos-13 as well, because actions/setup-python
-          # publishes no arm64 macOS build of 3.8 -- an Intel-only image kept
-          # alive for one interpreter, at ten times the per-minute cost and
-          # minutes of queueing. The darwin branches are covered by the
-          # macos-latest leg.
-          - os: ubuntu-22.04
-            python: '3.8'
+          # Both ends of the supported range run on Linux and Windows, the two
+          # platforms with their own code paths in the package. The darwin
+          # branches are covered by the macos-latest leg.
           - os: ubuntu-latest
-            python: '3.12'
+            python: '3.11'
+          - os: ubuntu-latest
+            python: '3.13'
           - os: windows-latest
-            python: '3.8'
+            python: '3.11'
           - os: windows-latest
-            python: '3.12'
+            python: '3.13'
           - os: macos-latest
-            python: '3.12'
+            python: '3.13'
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

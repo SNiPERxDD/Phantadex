@@ -161,8 +161,9 @@ class ScrollerSelectionTests(unittest.TestCase):
 
 class ScrollDirectionTests(unittest.TestCase):
     def test_reading_scroll_never_moves_backward(self):
-        with mock.patch.object(interaction.random, "randint", return_value=200), mock.patch.object(
-            interaction.random, "random", return_value=0
+        with (
+            mock.patch.object(interaction.random, "randint", return_value=200),
+            mock.patch.object(interaction.random, "random", return_value=0),
         ):
             middle = interaction._next_delta({"top": 300, "max": 1000})
             bottom = interaction._next_delta({"top": 990, "max": 1000})
@@ -181,15 +182,17 @@ class ReadingSessionTests(unittest.TestCase):
 
     def test_short_reading_without_a_scroller_does_not_emit_wheel_events(self):
         page = self._page()
-        with mock.patch.object(interaction, "find_scroller", return_value=None), mock.patch.object(
-            interaction, "_session_geometry", return_value=(60, 500, 300)
-        ), mock.patch.object(interaction.modals, "dismiss_all"), mock.patch.object(
-            interaction.time, "time", side_effect=[0, 1, 61, 62]
-        ), mock.patch.object(interaction.time, "sleep"), mock.patch.object(
-            interaction.logs, "warn"
-        ), mock.patch.object(interaction.logs, "bar"), mock.patch.object(
-            interaction.logs, "bar_done"
-        ), mock.patch.object(interaction.logs, "ok"):
+        with (
+            mock.patch.object(interaction, "find_scroller", return_value=None),
+            mock.patch.object(interaction, "_session_geometry", return_value=(60, 500, 300)),
+            mock.patch.object(interaction.modals, "dismiss_all"),
+            mock.patch.object(interaction.time, "time", side_effect=[0, 1, 61, 62]),
+            mock.patch.object(interaction.time, "sleep"),
+            mock.patch.object(interaction.logs, "warn"),
+            mock.patch.object(interaction.logs, "bar"),
+            mock.patch.object(interaction.logs, "bar_done"),
+            mock.patch.object(interaction.logs, "ok"),
+        ):
             result = interaction.reading_session(page, 1)
 
         self.assertEqual(result, "COMPLETED")
@@ -203,20 +206,17 @@ class ReadingSessionTests(unittest.TestCase):
             page.url = "https://www.coursera.org/learn/demo/lecture/bbb/video-title"
             return metrics
 
-        with mock.patch.object(
-            interaction, "find_scroller", return_value=object()
-        ), mock.patch.object(
-            interaction, "_session_geometry", return_value=(60, 500, 300)
-        ), mock.patch.object(
-            interaction, "scroll_metrics", return_value=metrics
-        ), mock.patch.object(
-            interaction, "scroll_by", side_effect=navigate_during_scroll
-        ), mock.patch.object(interaction.modals, "dismiss_all"), mock.patch.object(
-            interaction.time, "time", side_effect=[0, 1, 61, 62]
-        ), mock.patch.object(interaction.time, "sleep"), mock.patch.object(
-            interaction.logs, "bar"
-        ), mock.patch.object(interaction.logs, "bar_done"), mock.patch.object(
-            interaction.logs, "ok"
+        with (
+            mock.patch.object(interaction, "find_scroller", return_value=object()),
+            mock.patch.object(interaction, "_session_geometry", return_value=(60, 500, 300)),
+            mock.patch.object(interaction, "scroll_metrics", return_value=metrics),
+            mock.patch.object(interaction, "scroll_by", side_effect=navigate_during_scroll),
+            mock.patch.object(interaction.modals, "dismiss_all"),
+            mock.patch.object(interaction.time, "time", side_effect=[0, 1, 61, 62]),
+            mock.patch.object(interaction.time, "sleep"),
+            mock.patch.object(interaction.logs, "bar"),
+            mock.patch.object(interaction.logs, "bar_done"),
+            mock.patch.object(interaction.logs, "ok"),
         ):
             result = interaction.reading_session(page, 1)
 

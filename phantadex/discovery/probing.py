@@ -174,8 +174,11 @@ def _save_findings(findings):
         dir=os.path.dirname(CONFIG_FILE), prefix=".selectors.", suffix=".tmp"
     )
     try:
-        with os.fdopen(descriptor, "w") as handle:
-            yaml.dump(findings, handle, sort_keys=False)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            # allow_unicode keeps a selector's non-ASCII text readable in the
+            # file instead of escaping it, and the pair makes the write
+            # independent of the locale encoding on the machine that runs it.
+            yaml.dump(findings, handle, sort_keys=False, allow_unicode=True)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary_path, CONFIG_FILE)

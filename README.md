@@ -1,7 +1,7 @@
 # Phantadex
 
 ![Version](https://img.shields.io/badge/version-2.0.0-blue?style=flat-square)
-![Python](https://img.shields.io/badge/python-3.8%2B-green?style=flat-square)
+![Python](https://img.shields.io/badge/python-3.11%2B-green?style=flat-square)
 ![Protocol](https://img.shields.io/badge/protocol-CDP-orange?style=flat-square)
 ![Status](https://img.shields.io/badge/status-Research_Prototype-red?style=flat-square)
 
@@ -52,7 +52,7 @@ Product vocabulary:
 The system requires an initialized debugging interface on the host browser.
 
 ### A. Environment
-*   **Python:** 3.8+
+*   **Python:** 3.11+
 *   **Dependencies:** `playwright`, `plyer`, `PyYAML` -- all three are declared in
     `pyproject.toml`, so `pip install -e .` pulls them in.
 *   **Browser:** Google Chrome. The tool attaches to the browser you already use

@@ -177,9 +177,11 @@ class PackageCliTests(unittest.TestCase):
     def test_watch_rejects_reversed_reading_minute_range(self):
         cli = self._load_cli()
 
-        with mock.patch.object(cli.watch.runner, "run") as run, redirect_stderr(
-            io.StringIO()
-        ), self.assertRaises(SystemExit) as raised:
+        with (
+            mock.patch.object(cli.watch.runner, "run") as run,
+            redirect_stderr(io.StringIO()),
+            self.assertRaises(SystemExit) as raised,
+        ):
             cli.main(["watch", "--reading-minutes", "6-3"])
 
         self.assertEqual(raised.exception.code, 2)
@@ -238,9 +240,10 @@ class PackageCliTests(unittest.TestCase):
 
     def test_discover_honours_the_verbosity_flag(self):
         cli = self._load_cli()
-        with mock.patch.object(cli.discovery, "start_dynamic_observation"), mock.patch.object(
-            cli.logs, "setup"
-        ) as setup:
+        with (
+            mock.patch.object(cli.discovery, "start_dynamic_observation"),
+            mock.patch.object(cli.logs, "setup") as setup,
+        ):
             cli.main(["discover", "-v"])
 
         setup.assert_called_once_with("DEBUG")

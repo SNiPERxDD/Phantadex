@@ -158,9 +158,12 @@ class RetreatTests(unittest.TestCase):
     def test_previous_click_that_does_not_move_falls_back_to_map(self):
         page = FakePage(url=ITEM_A)
         manager = FakeManager()
-        with mock.patch.object(
-            navigation.schema, "first_visible", return_value=FakeLocator(count=1)
-        ), mock.patch.object(navigation.interaction, "click", return_value=True):
+        with (
+            mock.patch.object(
+                navigation.schema, "first_visible", return_value=FakeLocator(count=1)
+            ),
+            mock.patch.object(navigation.interaction, "click", return_value=True),
+        ):
             result = navigation.retreat(page, manager, start_url=ITEM_A)
 
         self.assertEqual(result, "NAVIGATED")
@@ -177,9 +180,10 @@ class RetreatTests(unittest.TestCase):
 class MarkCompleteTests(unittest.TestCase):
     def test_clicks_the_visible_completion_button(self):
         button = FakeLocator(count=1)
-        with mock.patch.object(
-            navigation.schema, "first_visible", return_value=button
-        ), mock.patch.object(navigation.interaction, "click", return_value=True) as click:
+        with (
+            mock.patch.object(navigation.schema, "first_visible", return_value=button),
+            mock.patch.object(navigation.interaction, "click", return_value=True) as click,
+        ):
             self.assertTrue(navigation.mark_complete(FakePage()))
         click.assert_called_once()
 

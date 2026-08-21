@@ -316,9 +316,11 @@ class PointerNavigationTests(unittest.TestCase):
     def test_auto_hop_moves_before_clicking_next(self):
         page = FakePage()
         button = FakeLocator(count=1, events=page.pointer_events)
-        with mock.patch.object(
-            probing, "find_element_in_frames", return_value=(button, "main")
-        ), mock.patch("time.sleep"), mock.patch("phantadex.interaction.time.sleep"):
+        with (
+            mock.patch.object(probing, "find_element_in_frames", return_value=(button, "main")),
+            mock.patch("time.sleep"),
+            mock.patch("phantadex.interaction.time.sleep"),
+        ):
             self.assertTrue(
                 discovery.auto_hop_next(page, {"navigation": {"next_item": ["button.next"]}})
             )
@@ -423,11 +425,13 @@ class ObservationStateTests(unittest.TestCase):
         }
         state = ObservationState()
         page = FakePage()
-        with mock.patch.object(
-            observation.course_map, "get_detailed_course_map", return_value=outline
-        ), mock.patch.object(
-            observation.context, "get_robust_course_name", return_value="Demo"
-        ), capture_console():
+        with (
+            mock.patch.object(
+                observation.course_map, "get_detailed_course_map", return_value=outline
+            ),
+            mock.patch.object(observation.context, "get_robust_course_name", return_value="Demo"),
+            capture_console(),
+        ):
             targets = observation.get_sidebar_targets(page, state)
 
         self.assertEqual(state.required_types, {"VIDEO", "READING"})
@@ -437,13 +441,12 @@ class ObservationStateTests(unittest.TestCase):
 
     def test_the_map_is_printed_once_per_session(self):
         state = ObservationState()
-        with mock.patch.object(
-            observation.course_map, "get_detailed_course_map", return_value={}
-        ), mock.patch.object(
-            observation.context, "get_robust_course_name", return_value="Demo"
-        ), mock.patch.object(
-            observation.course_map, "print_course_map"
-        ) as printed, capture_console():
+        with (
+            mock.patch.object(observation.course_map, "get_detailed_course_map", return_value={}),
+            mock.patch.object(observation.context, "get_robust_course_name", return_value="Demo"),
+            mock.patch.object(observation.course_map, "print_course_map") as printed,
+            capture_console(),
+        ):
             observation.get_sidebar_targets(FakePage(), state)
             observation.get_sidebar_targets(FakePage(), state)
 
@@ -455,11 +458,14 @@ class SmartHopTests(unittest.TestCase):
         # The jump used to concatenate a hardcoded origin onto the href.
         state = ObservationState(required_types={"READING"})
         page = FakePage()
-        with mock.patch.object(
-            observation,
-            "get_sidebar_targets",
-            return_value={"READING": "/learn/demo/supplement/bbb/notes"},
-        ), capture_console():
+        with (
+            mock.patch.object(
+                observation,
+                "get_sidebar_targets",
+                return_value={"READING": "/learn/demo/supplement/bbb/notes"},
+            ),
+            capture_console(),
+        ):
             self.assertTrue(observation.auto_hop_smart(page, {}, state))
 
         self.assertEqual(
@@ -468,9 +474,10 @@ class SmartHopTests(unittest.TestCase):
 
     def test_nothing_missing_ends_the_session(self):
         state = ObservationState(required_types={"VIDEO"}, discovered_types={"VIDEO"})
-        with mock.patch.object(
-            observation, "get_sidebar_targets", return_value={}
-        ), capture_console():
+        with (
+            mock.patch.object(observation, "get_sidebar_targets", return_value={}),
+            capture_console(),
+        ):
             self.assertFalse(observation.auto_hop_smart(FakePage(), {}, state))
 
 

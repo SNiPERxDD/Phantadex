@@ -85,7 +85,7 @@ def _normalize(content):
 def _is_duplicate(path, new_content):
     """Reports whether ``path`` already holds exactly ``new_content``."""
     try:
-        with open(path, "r", encoding="utf-8") as handle:
+        with open(path, encoding="utf-8") as handle:
             existing = handle.read()
     except OSError as exc:
         log.debug("Could not read %s for comparison: %s", path, exc)

@@ -172,13 +172,12 @@ class RuntimeVocabularyTests(unittest.TestCase):
         page = FakePage()
         fake_session = FakeBrowserSession(page)
 
-        with mock.patch.object(
-            archive, "BrowserSession", return_value=fake_session
-        ), mock.patch.object(
-            archive, "get_robust_course_name", return_value=None
-        ), mock.patch.object(
-            archive, "get_detailed_course_map", return_value={"Module": []}
-        ), mock.patch.object(archive, "CourseManager") as manager:
+        with (
+            mock.patch.object(archive, "BrowserSession", return_value=fake_session),
+            mock.patch.object(archive, "get_robust_course_name", return_value=None),
+            mock.patch.object(archive, "get_detailed_course_map", return_value={"Module": []}),
+            mock.patch.object(archive, "CourseManager") as manager,
+        ):
             result = archive.run(config.Settings())
 
         self.assertEqual(result, 1)

@@ -289,9 +289,11 @@ class QuizHandoffTests(unittest.TestCase):
 
     def _handle(self, page):
         ctx = handlers.Context(settings=mock.Mock())
-        with mock.patch.object(handlers.time, "sleep"), mock.patch.object(
-            handlers.detection, "is_graded", return_value=True
-        ), mock.patch.object(handlers.navigation, "advance", return_value="NAVIGATED") as advance:
+        with (
+            mock.patch.object(handlers.time, "sleep"),
+            mock.patch.object(handlers.detection, "is_graded", return_value=True),
+            mock.patch.object(handlers.navigation, "advance", return_value="NAVIGATED") as advance,
+        ):
             outcome = handlers.QuizHandler().handle(page, ctx)
         return outcome, advance
 
@@ -413,9 +415,10 @@ class FailedItemRetryTests(unittest.TestCase):
 
     def test_a_failed_advance_leaves_the_counter_standing(self):
         instance = self._runner()
-        with mock.patch.object(
-            runner.navigation, "advance", return_value="FAILED"
-        ), mock.patch.object(runner.time, "sleep"):
+        with (
+            mock.patch.object(runner.navigation, "advance", return_value="FAILED"),
+            mock.patch.object(runner.time, "sleep"),
+        ):
             instance._advance_failed_item(FakePage(url=ITEM_A), urls.normalize_path(ITEM_A))
         self.assertEqual(instance.handler_failures[urls.normalize_path(ITEM_A)], 3)
 
@@ -435,8 +438,9 @@ class ModalScopeTests(unittest.TestCase):
         header = FakeLocator(count=1, children={"xpath=ancestor::*[.//button][1]": container})
         page = FakePage(locators={"h1, h2|Coursera Honor Code": header})
 
-        with mock.patch.object(modals.time, "sleep"), mock.patch(
-            "phantadex.interaction.click", return_value=True
+        with (
+            mock.patch.object(modals.time, "sleep"),
+            mock.patch("phantadex.interaction.click", return_value=True),
         ):
             handled = modals._dismiss_one(
                 page, "Coursera Honor Code", "h1, h2", ("Continue",), "accepted"
@@ -449,9 +453,10 @@ class ModalScopeTests(unittest.TestCase):
         # path; without the container scope it clicked a page-wide "Continue".
         header = FakeLocator(count=1)
         page = FakePage(locators={"h1, h2, h3|Reflect": header})
-        with mock.patch.object(modals.time, "sleep"), mock.patch(
-            "phantadex.interaction.click", return_value=True
-        ) as click:
+        with (
+            mock.patch.object(modals.time, "sleep"),
+            mock.patch("phantadex.interaction.click", return_value=True) as click,
+        ):
             handled = modals._dismiss_one(page, "Reflect", "h1, h2, h3", ("Continue",), "skipped")
         self.assertFalse(handled)
         click.assert_not_called()
@@ -480,15 +485,15 @@ class SelectorStateWriteTests(unittest.TestCase):
             category: {name: "button.default" for name in elements}
             for category, elements in element_schema.ELEMENTS_SCHEMA.items()
         }
-        with mock.patch.object(
-            probing, "_probe_element", return_value=("button.default", "css")
-        ), mock.patch.object(probing, "_save_findings") as save, mock.patch.object(
-            probing.rules, "detect_page_type", return_value="VIDEO"
-        ), mock.patch.object(
-            probing.context, "get_page_metadata", return_value=("m", "i", "")
-        ), mock.patch("time.sleep"), mock.patch.object(
-            schema, "state_selectors", return_value={}
-        ), capture_console():
+        with (
+            mock.patch.object(probing, "_probe_element", return_value=("button.default", "css")),
+            mock.patch.object(probing, "_save_findings") as save,
+            mock.patch.object(probing.rules, "detect_page_type", return_value="VIDEO"),
+            mock.patch.object(probing.context, "get_page_metadata", return_value=("m", "i", "")),
+            mock.patch("time.sleep"),
+            mock.patch.object(schema, "state_selectors", return_value={}),
+            capture_console(),
+        ):
             probing.discover_selectors(FakePage(), ObservationState(selectors=existing))
         save.assert_not_called()
 

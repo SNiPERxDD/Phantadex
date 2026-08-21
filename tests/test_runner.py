@@ -58,17 +58,17 @@ class ArchiveBeforeSkipTests(unittest.TestCase):
         watch = runner.Runner(config.Settings())
         broken = mock.Mock()
         broken.handle.side_effect = RuntimeError("detached DOM")
-        with mock.patch.object(watch, "_detect_stuck", return_value=False), mock.patch.object(
-            watch, "_sync_course_map"
-        ), mock.patch.object(watch, "_log_context"), mock.patch.object(
-            runner.modals, "dismiss_all"
-        ), mock.patch.object(
-            runner.detection, "classify", return_value=detection.VIDEO
-        ), mock.patch.object(
-            runner.handlers, "for_page_type", return_value=broken
-        ), mock.patch.object(watch, "_skip_completed", return_value="PROCEED"), mock.patch.object(
-            runner.navigation, "advance", return_value="NAVIGATED"
-        ) as advance, mock.patch.object(runner.time, "sleep"):
+        with (
+            mock.patch.object(watch, "_detect_stuck", return_value=False),
+            mock.patch.object(watch, "_sync_course_map"),
+            mock.patch.object(watch, "_log_context"),
+            mock.patch.object(runner.modals, "dismiss_all"),
+            mock.patch.object(runner.detection, "classify", return_value=detection.VIDEO),
+            mock.patch.object(runner.handlers, "for_page_type", return_value=broken),
+            mock.patch.object(watch, "_skip_completed", return_value="PROCEED"),
+            mock.patch.object(runner.navigation, "advance", return_value="NAVIGATED") as advance,
+            mock.patch.object(runner.time, "sleep"),
+        ):
             for _ in range(3):
                 result = watch._tick(current)
         self.assertEqual(result, runner.handlers.CONTINUE)
@@ -78,13 +78,14 @@ class ArchiveBeforeSkipTests(unittest.TestCase):
         watch = runner.Runner(config.Settings())
         watch.ctx.manager = FakeManager()
         page = FakePage(url="https://www.coursera.org/learn/c/supplement/abc/locked")
-        with mock.patch.object(watch, "_detect_stuck", return_value=False), mock.patch.object(
-            watch, "_sync_course_map"
-        ), mock.patch.object(watch, "_log_context"), mock.patch.object(
-            runner.page_ops, "is_locked_item", return_value=True
-        ), mock.patch.object(
-            runner.navigation, "retreat", return_value="NAVIGATED"
-        ) as retreat, mock.patch.object(runner.detection, "classify") as classify:
+        with (
+            mock.patch.object(watch, "_detect_stuck", return_value=False),
+            mock.patch.object(watch, "_sync_course_map"),
+            mock.patch.object(watch, "_log_context"),
+            mock.patch.object(runner.page_ops, "is_locked_item", return_value=True),
+            mock.patch.object(runner.navigation, "retreat", return_value="NAVIGATED") as retreat,
+            mock.patch.object(runner.detection, "classify") as classify,
+        ):
             result = watch._tick(page)
 
         self.assertEqual(result, runner.handlers.CONTINUE)

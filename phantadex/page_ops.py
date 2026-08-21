@@ -165,7 +165,7 @@ def _transcript_from_download(page):
                 raise RuntimeError("Transcript download link was not clickable")
         temp_path = download_info.value.path()
         if temp_path and os.path.exists(temp_path):
-            with open(temp_path, "r", encoding="utf-8", errors="ignore") as handle:
+            with open(temp_path, encoding="utf-8", errors="ignore") as handle:
                 text = handle.read().strip()
             if text:
                 return text

@@ -58,28 +58,31 @@ class HandlerBehaviourTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def test_plugin_with_a_completion_control_dwells_then_marks_complete(self):
-        with mock.patch.object(
-            handlers.schema, "first_visible", return_value=FakeLocator(count=1)
-        ), mock.patch.object(handlers.interaction, "reading_session") as dwell, mock.patch.object(
-            handlers.navigation, "mark_complete"
-        ) as mark:
+        with (
+            mock.patch.object(handlers.schema, "first_visible", return_value=FakeLocator(count=1)),
+            mock.patch.object(handlers.interaction, "reading_session") as dwell,
+            mock.patch.object(handlers.navigation, "mark_complete") as mark,
+        ):
             result = handlers.PluginHandler().handle(self.page, self.ctx)
         dwell.assert_called_once()
         mark.assert_called_once()
         self.assertEqual(result, handlers.CONTINUE)
 
     def test_plugin_without_a_completion_control_just_advances(self):
-        with mock.patch.object(
-            handlers.schema, "first_visible", return_value=None
-        ), mock.patch.object(handlers.navigation, "mark_complete") as mark:
+        with (
+            mock.patch.object(handlers.schema, "first_visible", return_value=None),
+            mock.patch.object(handlers.navigation, "mark_complete") as mark,
+        ):
             handlers.PluginHandler().handle(self.page, self.ctx)
         mark.assert_not_called()
         self.advance.assert_called_once()
 
     def test_assignment_is_never_submitted(self):
-        with mock.patch.object(handlers.navigation, "mark_complete") as mark, mock.patch.object(
-            handlers.urls, "same_item", side_effect=[True, False]
-        ), mock.patch.object(handlers.time, "sleep") as sleep:
+        with (
+            mock.patch.object(handlers.navigation, "mark_complete") as mark,
+            mock.patch.object(handlers.urls, "same_item", side_effect=[True, False]),
+            mock.patch.object(handlers.time, "sleep") as sleep,
+        ):
             result = handlers.AssignmentHandler().handle(self.page, self.ctx)
         mark.assert_not_called()
         self.assertEqual(self.ctx.manager.saved, [])
@@ -95,9 +98,10 @@ class HandlerBehaviourTests(unittest.TestCase):
 
     def test_discussion_never_posts_a_reply(self):
         # Completing a discussion means publishing under the user's name.
-        with mock.patch.object(
-            handlers.page_ops, "extract_reading", return_value="Prompt text."
-        ), mock.patch.object(handlers.navigation, "mark_complete") as mark:
+        with (
+            mock.patch.object(handlers.page_ops, "extract_reading", return_value="Prompt text."),
+            mock.patch.object(handlers.navigation, "mark_complete") as mark,
+        ):
             handlers.DiscussionHandler().handle(self.page, self.ctx)
         mark.assert_not_called()
 
@@ -109,13 +113,11 @@ class HandlerBehaviourTests(unittest.TestCase):
 
     def test_missing_reading_body_never_starts_a_reading_session(self):
         self.page.url = "https://www.coursera.org/learn/c/supplement/aaa/reading"
-        with mock.patch.object(
-            handlers.page_ops, "extract_reading", return_value=None
-        ), mock.patch.object(
-            handlers.page_ops, "detect_reading_minutes"
-        ) as duration, mock.patch.object(
-            handlers.interaction, "reading_session"
-        ) as reading_session:
+        with (
+            mock.patch.object(handlers.page_ops, "extract_reading", return_value=None),
+            mock.patch.object(handlers.page_ops, "detect_reading_minutes") as duration,
+            mock.patch.object(handlers.interaction, "reading_session") as reading_session,
+        ):
             with self.assertRaisesRegex(RuntimeError, "content"):
                 handlers.ReadingHandler().handle(self.page, self.ctx)
 
@@ -124,13 +126,14 @@ class HandlerBehaviourTests(unittest.TestCase):
 
     def test_reading_navigation_does_not_complete_or_advance_the_new_page(self):
         self.page.url = "https://www.coursera.org/learn/c/supplement/aaa/reading"
-        with mock.patch.object(
-            handlers.page_ops, "extract_reading", return_value="Reading body"
-        ), mock.patch.object(
-            handlers.page_ops, "detect_reading_minutes", return_value=(1, "sidebar")
-        ), mock.patch.object(
-            handlers.interaction, "reading_session", return_value="NAVIGATED"
-        ), mock.patch.object(handlers.navigation, "mark_complete") as mark:
+        with (
+            mock.patch.object(handlers.page_ops, "extract_reading", return_value="Reading body"),
+            mock.patch.object(
+                handlers.page_ops, "detect_reading_minutes", return_value=(1, "sidebar")
+            ),
+            mock.patch.object(handlers.interaction, "reading_session", return_value="NAVIGATED"),
+            mock.patch.object(handlers.navigation, "mark_complete") as mark,
+        ):
             result = handlers.ReadingHandler().handle(self.page, self.ctx)
 
         mark.assert_not_called()
