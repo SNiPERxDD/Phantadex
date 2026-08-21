@@ -66,14 +66,17 @@ class LaunchTests(unittest.TestCase):
         self.assertEqual(chrome._debug_port("http://localhost"), 9222)
 
     def test_chrome_is_started_on_the_requested_port(self):
+        # Compared against the Path, not a POSIX literal: Windows renders
+        # Path("/bin/chrome") as "\bin\chrome".
+        executable = Path("/bin/chrome")
         with mock.patch.object(chrome, "port_in_use", side_effect=[False, True]):
-            with mock.patch.object(chrome, "chrome_binary", return_value=Path("/bin/chrome")):
+            with mock.patch.object(chrome, "chrome_binary", return_value=executable):
                 with mock.patch.object(Path, "mkdir"):
                     with mock.patch.object(chrome.time, "sleep"):
                         with mock.patch.object(chrome.subprocess, "Popen") as popen:
                             self.assertEqual(chrome.main(["--cdp-url", "http://localhost:9444"]), 0)
         command = popen.call_args[0][0]
-        self.assertEqual(command[0], "/bin/chrome")
+        self.assertEqual(command[0], str(executable))
         self.assertIn("--remote-debugging-port=9444", command)
 
 
