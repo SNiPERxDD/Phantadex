@@ -13,6 +13,10 @@ log = logs.get_logger("modals")
 
 DIALOG_SELECTOR = "[role='dialog'], [aria-modal='true']"
 
+# Headings already reported as unclearable, so the warning is not repeated on
+# every tick the modal stays on screen.
+_REPORTED_STALLS = set()
+
 # Scope for the prompts Coursera injects into a playing video. A live capture of
 # a Poll showed it inside `role="dialog" aria-modal="true"` (`cds-Dialog-dialog`)
 # nested in the player's `rc-VideoQuiz` container; the container is included so
@@ -29,11 +33,15 @@ IN_VIDEO_SCOPE = "[role='dialog'], [aria-modal='true'], .rc-VideoQuiz"
 # for a dismiss button.
 MODAL_RULES = (
     ("Coursera Honor Code", "h1, h2", ("Continue",), "Honor Code accepted", None),
+    # Declining controls only. The rule used to offer `Continue` and `Submit`,
+    # either of which answers a survey about the user in their name and without
+    # them present. If none of these is on screen the survey is left alone and
+    # reported, which is the correct outcome: it is theirs to answer.
     (
         "Demographics Survey",
         "h1, h2",
-        ("Continue", "Submit"),
-        "demographics survey dismissed",
+        ("Skip", "Skip for now", "No thanks", "Not now", "Maybe later"),
+        "demographics survey declined",
         None,
     ),
     # Coursera's daily-goal congratulation. It renders over the item and covers
@@ -107,7 +115,22 @@ def _dismiss_one(page, heading, heading_selector, button_labels, message, scope=
         except Exception as exc:
             log.debug("Could not click %r on %r modal: %s", label, heading, exc)
     log.debug("Modal %r visible but no dismiss button matched %s", heading, button_labels)
+    _report_stall(heading, button_labels)
     return False
+
+
+def _report_stall(heading, button_labels):
+    """Surfaces a modal the run will not clear, once per heading per process.
+
+    Without this the only trace was a debug line, so a dialog that the run
+    deliberately declines to answer -- or one whose controls have been renamed
+    -- looked identical to no dialog at all.
+    """
+    if heading in _REPORTED_STALLS:
+        return
+    _REPORTED_STALLS.add(heading)
+    labels = ", ".join(repr(label) for label in button_labels)
+    logs.warn(f"'{heading}' is on screen and none of {labels} is available; it is yours to clear")
 
 
 def _nearest_button_container(header, page):

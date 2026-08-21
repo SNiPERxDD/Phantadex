@@ -34,6 +34,11 @@
   row types and live page classification disagree often enough -- a
   survey-titled supplement maps to `FILLER` but reads as a `READING` -- that a
   file could be written with nothing recording it.
+- The demographics survey is declined, never submitted: `MODAL_RULES` lists
+  only declining controls for it. A modal whose heading is on screen but whose
+  listed controls are absent is warned about once per heading
+  (`modals._REPORTED_STALLS`) and left for the user. The Honor Code rule still
+  clicks `Continue`, which is the same click the user makes to open the item.
 - `python -m phantadex` provides the same interface. The root Watch and Archive
   scripts remain compatibility wrappers.
 - Runtime output names Phantadex Watch, Archive, Dex, and Link.

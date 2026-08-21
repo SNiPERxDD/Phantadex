@@ -382,6 +382,10 @@ python run_tests.py --live   # additionally probe a running Chrome session
     policy and never treated as a scrollable reading. Scrolling is limited to an
     overflowing ancestor of the reading body; short readings dwell without wheel
     input, stop at the bottom, and exit immediately if the active item changes.
+*   **Modals:** Interstitials are cleared through controls that decline them.
+    The demographics survey is skipped rather than submitted, since submitting
+    it would answer questions about the user without them present. A modal that
+    offers no such control is reported once and left alone.
 *   **Audio:** Media is muted by a guard installed ahead of the page's own
     scripts, so a player is silent from `loadstart` rather than from the next
     poll, and an attempt to raise the volume afterwards is undone. The guard is

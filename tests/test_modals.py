@@ -12,6 +12,9 @@ class DismissTests(unittest.TestCase):
         patcher = mock.patch.object(modals.time, "sleep")
         patcher.start()
         self.addCleanup(patcher.stop)
+        # The stall report is deduplicated for the life of the process.
+        modals._REPORTED_STALLS.clear()
+        self.addCleanup(modals._REPORTED_STALLS.clear)
 
     def test_clicks_continue_on_honor_code(self):
         page = FakePage()
@@ -23,6 +26,42 @@ class DismissTests(unittest.TestCase):
         self.assertEqual(modals.dismiss_all(page), 1)
         self.assertEqual(button.clicked, 1)
         self.assertEqual(page.pointer_events[:2], ["move", "click"])
+
+    def test_the_demographics_survey_is_never_answered(self):
+        # The survey asks about the user. Submitting it unattended answers for
+        # them, so the run may only decline it.
+        submit = FakeLocator(count=1)
+        proceed = FakeLocator(count=1)
+        page = FakePage(
+            locators={
+                "h1, h2|Demographics Survey": FakeLocator(count=1),
+                "button:has-text('Submit')": submit,
+                "button:has-text('Continue')": proceed,
+            }
+        )
+        with mock.patch.object(modals.logs, "warn") as warn:
+            self.assertEqual(modals.dismiss_all(page), 0)
+        self.assertEqual(submit.clicked, 0)
+        self.assertEqual(proceed.clicked, 0)
+        warn.assert_called_once()
+
+    def test_the_demographics_survey_is_declined_when_it_offers_a_way_out(self):
+        skip = FakeLocator(count=1)
+        page = FakePage(
+            locators={
+                "h1, h2|Demographics Survey": FakeLocator(count=1),
+                "button:has-text('Skip')": skip,
+            }
+        )
+        self.assertEqual(modals.dismiss_all(page), 1)
+        self.assertEqual(skip.clicked, 1)
+
+    def test_an_unclearable_modal_is_reported_once(self):
+        page = FakePage(locators={"h1, h2|Demographics Survey": FakeLocator(count=1)})
+        with mock.patch.object(modals.logs, "warn") as warn:
+            modals.dismiss_all(page)
+            modals.dismiss_all(page)
+        self.assertEqual(warn.call_count, 1)
 
     def test_no_modal_is_a_noop(self):
         self.assertEqual(modals.dismiss_all(FakePage()), 0)
