@@ -158,6 +158,20 @@ class SegmentLabelTests(unittest.TestCase):
             self.assertNotEqual(detection.label_from_url(url), detection.UNKNOWN, segment)
             self.assertNotEqual(detection.type_from_url(url), detection.UNKNOWN, segment)
 
+    def test_segments_resolve_whatever_their_casing(self):
+        # The tables are written in Coursera's camelCase and urls.item_id
+        # already lowers before its own lookup. Matching exact case here let the
+        # same URL be recognised by one module and not the other.
+        for segment in detection.URL_SEGMENT_LABELS:
+            for variant in (segment.lower(), segment.upper()):
+                url = f"/learn/course/{variant}/abc/title"
+                self.assertNotEqual(detection.type_from_url(url), detection.UNKNOWN, variant)
+                self.assertEqual(
+                    detection.type_from_url(url),
+                    detection.type_from_url(f"/learn/course/{segment}/abc/title"),
+                    variant,
+                )
+
     def test_unrecognised_segment_is_unknown(self):
         self.assertEqual(detection.label_from_url("/learn/c/module/x/y"), detection.UNKNOWN)
 

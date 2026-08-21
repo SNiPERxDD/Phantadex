@@ -312,6 +312,53 @@ class CompletionStatusTests(unittest.TestCase):
         self.assertIn("? Notes · reading · 5 min", output.getvalue())
 
 
+class FakeFrame:
+    """A frame that resolves one selector, standing in for an embedded document."""
+
+    def __init__(self, locator, name="embedded", url="https://example.test/frame"):
+        self._locator = locator
+        self.name = name
+        self.url = url
+
+    def locator(self, _selector):
+        return self._locator
+
+
+class FramedSelectorProbeTests(unittest.TestCase):
+    """A match inside a frame still has to be on screen to count as verified."""
+
+    def _page(self, frame_locator):
+        page = FakePage(locators={"button.target": FakeLocator(count=0)})
+        page.frames = [FakeFrame(frame_locator)]
+        return page
+
+    def test_a_visible_frame_match_is_returned(self):
+        page = self._page(FakeLocator(count=1, visible=True))
+        located, where = probing.find_element_in_frames(page, "button.target")
+        self.assertIsNotNone(located)
+        self.assertTrue(where.startswith("frame["))
+
+    def test_a_hidden_frame_match_is_rejected(self):
+        # Accepting it recorded a hidden selector as *verified*, and verified
+        # selectors outrank the packaged defaults until the next discovery run.
+        page = self._page(FakeLocator(count=1, visible=False))
+        self.assertEqual(probing.find_element_in_frames(page, "button.target"), (None, None))
+
+    def test_a_frame_that_cannot_answer_falls_back_to_its_bounding_box(self):
+        locator = FakeLocator(count=1, visible=True)
+        locator.is_visible = mock.Mock(side_effect=RuntimeError("cross-origin"))
+        page = self._page(locator)
+        located, _where = probing.find_element_in_frames(page, "button.target")
+        self.assertIsNotNone(located)
+
+    def test_a_zero_sized_frame_match_is_rejected(self):
+        locator = FakeLocator(count=1, visible=True)
+        locator.is_visible = mock.Mock(side_effect=RuntimeError("cross-origin"))
+        locator.bounding_box = mock.Mock(return_value={"width": 0, "height": 0})
+        page = self._page(locator)
+        self.assertEqual(probing.find_element_in_frames(page, "button.target"), (None, None))
+
+
 class PointerNavigationTests(unittest.TestCase):
     def test_auto_hop_moves_before_clicking_next(self):
         page = FakePage()

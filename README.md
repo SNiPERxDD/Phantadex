@@ -332,7 +332,7 @@ place on a terminal and print one line per decile when redirected to a file.
 
 ## 7. Tests
 
-240 tests, all offline — no browser, no network:
+The suite is offline — no browser, no network:
 
 ```bash
 python run_tests.py          # unit tests

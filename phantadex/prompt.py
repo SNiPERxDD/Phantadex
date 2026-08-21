@@ -22,9 +22,11 @@ def stay_on_item(timeout=30):
         logs.step("already complete; skipping (stdin is not a terminal)")
         return False
 
+    # The two paths differ: Windows acts on a single keypress, POSIX reads a
+    # line. Announcing "+ Enter" on Windows described the wrong interaction.
+    keys = "'s'" if os.name == "nt" else "'s' + Enter"
     logs.step(
-        f"already complete -- press 's' + Enter to skip, anything else to stay "
-        f"({timeout}s auto-skips)"
+        f"already complete -- press {keys} to skip, anything else to stay ({timeout}s auto-skips)"
     )
     if os.name == "nt":
         return _windows_prompt(timeout)

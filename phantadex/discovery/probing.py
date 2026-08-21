@@ -8,6 +8,7 @@ dependency between probing and hopping pointing one way.
 import logging
 import os
 import shutil
+import sys
 import tempfile
 import time
 from datetime import datetime
@@ -38,7 +39,7 @@ def find_element_in_frames(page, selector):
         for frame in page.frames:
             try:
                 loc = frame.locator(selector).first
-                if loc.count() > 0:  # Note: visibility check can be tricky in frames
+                if loc.count() > 0 and _is_usable(loc):
                     return loc, f"frame[{frame.name or frame.url[:30]}]"
             except Exception as exc:
                 log.debug("Frame probe failed: %s", exc)
@@ -46,6 +47,28 @@ def find_element_in_frames(page, selector):
     except Exception as exc:
         log.debug("Cross-frame locator search failed: %s", exc)
     return None, None
+
+
+def _is_usable(locator):
+    """Reports whether a frame match is actually on screen.
+
+    The frame branch used to accept any match, on the grounds that visibility is
+    awkward across frames. The cost was silent: a hidden match was recorded as a
+    *verified* selector, and verified selectors outrank the packaged defaults
+    until the next discovery run. A hidden element still fails the visibility
+    check, so the fallback is a non-empty bounding box for the frames where
+    ``is_visible`` itself cannot answer.
+    """
+    try:
+        return locator.is_visible()
+    except Exception as exc:
+        log.debug("Frame visibility check failed: %s", exc)
+    try:
+        box = locator.bounding_box()
+    except Exception as exc:
+        log.debug("Frame bounding box unavailable: %s", exc)
+        return False
+    return bool(box and box.get("width") and box.get("height"))
 
 
 def backup_config():
@@ -255,6 +278,9 @@ def discover_selectors(page, state):
         logs.ok("selectors are stable; no changes needed")
 
     state.selectors = findings
-    logs.step("pausing for inspection (5s)")
-    time.sleep(5)
+    if sys.stdout.isatty():
+        # Only worth holding the highlights on screen for someone watching them;
+        # a scripted discovery pass paid the wait for nothing.
+        logs.step("pausing for inspection (5s)")
+        time.sleep(5)
     return findings

@@ -166,10 +166,18 @@ def _looks_like_reading(page):
 
 
 def _segment(url, table):
-    """Returns the table entry for the first recognised path segment."""
+    """Returns the table entry for the first recognised path segment.
+
+    Matched case-insensitively. The segment tables are written in Coursera's
+    camelCase, and ``urls.item_id`` already lowers before its own lookup; an
+    exact match here meant the same URL could be recognised by one module and
+    not the other if Coursera ever changed the casing.
+    """
+    folded = {key.lower(): value for key, value in table.items()}
     for part in (url or "").split("?")[0].split("/"):
-        if part in table:
-            return table[part]
+        entry = folded.get(part.lower())
+        if entry is not None:
+            return entry
     return UNKNOWN
 
 
