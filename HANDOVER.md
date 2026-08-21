@@ -132,7 +132,13 @@ course mapping and selector-discovery orchestration.
 - Windows was not available locally. The Windows `msvcrt` lock branch has a
   direct unit test; Python 3.8 syntax, shell-independent launcher invocation,
   and platform-neutral paths cover the remaining changed surface.
-- Latest gate: 337 offline tests pass; `ruff check phantadex tests` is clean
+- Latest gate: 349 offline tests pass; `ruff check phantadex tests` is clean
+- Packaging: the launcher moved from `scripts/start_chrome_debug.py` into
+  `phantadex/chrome.py` (`pdex chrome`) because `scripts/` is not in the wheel,
+  so an index install had no way to start the debug browser; the script path
+  stays as a wrapper. `.github/workflows/release.yml` publishes on a `v*` tag
+  through PyPI trusted publishing, which has to be configured on PyPI once
+  before the first release.
 - Cross-platform: `logs.console_stream()` widens stdout to UTF-8 before the
   handler is attached, which is what keeps a redirected run from dying on the
   first glyph under a non-UTF-8 locale; `storage.sanitize_filename` renames the

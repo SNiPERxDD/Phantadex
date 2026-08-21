@@ -13,22 +13,29 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install --upgrade pip ruff
-      - run: ruff check phantadex tests
+      - run: ruff check phantadex tests scripts
+      - run: ruff format --check phantadex tests scripts
 
   tests:
     strategy:
       fail-fast: false
       matrix:
         include:
-          # The 3.8 legs run on Intel images: actions/setup-python publishes no
-          # arm64 macOS build of 3.8, so macos-latest cannot provision it.
-          - os: macos-13
+          # The floor of requires-python is exercised on Linux and Windows.
+          # It used to run on macos-13 as well, because actions/setup-python
+          # publishes no arm64 macOS build of 3.8 -- an Intel-only image kept
+          # alive for one interpreter, at ten times the per-minute cost and
+          # minutes of queueing. The darwin branches are covered by the
+          # macos-latest leg.
+          - os: ubuntu-22.04
             python: '3.8'
-          - os: macos-latest
+          - os: ubuntu-latest
             python: '3.12'
           - os: windows-latest
             python: '3.8'
           - os: windows-latest
+            python: '3.12'
+          - os: macos-latest
             python: '3.12'
     runs-on: ${{ matrix.os }}
     steps:

@@ -4,10 +4,10 @@ import argparse
 import os
 import sys
 
-from . import archive, config, discovery, logs, video, watch
+from . import __version__, archive, chrome, config, discovery, logs, video, watch
 from .session import BrowserSession
 
-COMMANDS = ("dex", "skip", "watch", "archive", "discover")
+COMMANDS = ("dex", "skip", "watch", "archive", "discover", "chrome")
 
 
 def _help_parser():
@@ -23,7 +23,12 @@ def _help_parser():
         "command",
         nargs="?",
         choices=COMMANDS,
-        help="dex (default), skip, watch, archive, or discover",
+        help="dex (default), skip, watch, archive, discover, or chrome",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"phantadex {__version__}",
     )
     return parser
 
@@ -97,6 +102,9 @@ def main(argv=None):
     if arguments and arguments[0] in {"-h", "--help"}:
         _help_parser().print_help()
         return 0
+    if arguments and arguments[0] == "--version":
+        _help_parser().parse_args(["--version"])
+        return 0
 
     if arguments and arguments[0] in COMMANDS:
         command = arguments.pop(0)
@@ -111,6 +119,7 @@ def main(argv=None):
         "watch": watch.main,
         "archive": archive.main,
         "discover": discover_main,
+        "chrome": chrome.main,
     }
     try:
         return handlers[command](arguments)

@@ -60,31 +60,30 @@ The system requires an initialized debugging interface on the host browser.
 
 ### B. Installation
 
-**Windows (PowerShell Recommended):**
+Once the package is on PyPI, both platforms take one command. `pipx` keeps the
+tool in its own environment and still puts `pdex` on the PATH:
+
+```bash
+pipx install phantadex        # or: python -m pip install --user phantadex
+```
+
+**From a clone (current method, and how to develop):**
+
+Windows (PowerShell):
 ```powershell
-# 1. Clone the repository
 git clone https://github.com/SNiPERxDD/course-auto.git
 cd course-auto
-
-# 2. Create a virtual environment (keeps your system python clean)
 python -m venv .venv
 
-# 3. Allow script execution for this session (fixes "disabled by your system" errors)
+# Allows the activation script to run in this window only; a new terminal
+# needs it again.
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned -Force
-
-# 4. Activate the environment
 .\.venv\Scripts\Activate.ps1
 
-# 5. Install the package and its dependencies
 pip install -e .
 ```
 
-`pdex` is on the PATH once the environment is active. Reactivate it in every new
-terminal with `.\.venv\Scripts\Activate.ps1` -- step 3 only applies to the
-session that runs it, so a fresh PowerShell window needs it again before the
-activation script will run.
-
-**macOS / Linux:**
+macOS / Linux:
 ```bash
 git clone https://github.com/SNiPERxDD/course-auto.git
 cd course-auto
@@ -93,44 +92,41 @@ source venv/bin/activate
 pip install -e .
 ```
 
+`pip install -e .` pulls in `playwright`, `plyer` and `PyYAML`. Playwright's
+bundled browsers are not needed: the tool attaches to the Chrome you already
+use and never launches one of its own.
+
 ### C. Launch Configuration (Mandatory)
-The host browser must be started with the remote debugging port exposed. Execute the following from a terminal:
 
-**macOS:**
+Chrome has to be started once with its debugging port open. The launcher covers
+macOS, Windows and Linux:
+
 ```bash
-python3 scripts/start_chrome_debug.py
+pdex chrome
 ```
 
-**macOS (manual fallback):**
+It reports the endpoint if a debug Chrome is already running, and otherwise
+starts one on a profile kept with the tool's other state, so the courses stay
+signed in between runs. Set `PHANTADEX_CHROME` if Chrome lives somewhere
+unusual, `PHANTADEX_CHROME_PROFILE` to move the profile, and `--cdp-url` to use
+a different port.
+
+Manual equivalents, if you would rather not use the launcher:
+
 ```bash
+# macOS
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222 --user-data-dir="/tmp/chrome_dev"
-```
 
-**Linux (manual):** the launcher script covers macOS and Windows only.
-```bash
+# Linux
 google-chrome --remote-debugging-port=9222 --user-data-dir="/tmp/chrome_dev"
 ```
 
-**Windows (PowerShell):**
-Use the launcher. The manual commands remain fallbacks.
-
 ```powershell
-# Recommended
-python scripts/start_chrome_debug.py
-
-# Option 1: Standard 64-bit Installation
+# Windows
 & "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="C:\chrome_dev"
-
-# Option 2: Alternative (x86) Installation
-& "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="C:\chrome_dev"
 ```
 
-The launcher keeps its own Chrome profile in `chrome_profile/` inside the
-repository, so the first run starts signed out and the courses have to be logged
-into once. The manual commands above use a throwaway profile for the same
-reason; point `--user-data-dir` at a directory you keep if you would rather log
-in only once. Set `PHANTADEX_CHROME` when Chrome is installed somewhere the
-launcher does not look.
+Sign in to the course in that window, then leave it open.
 
 ## 3. Execution Protocol
 
@@ -202,7 +198,8 @@ phantadex_archive.py  # compatibility wrapper for pdex archive
 phantadex/
   config.yaml         # shipped selector defaults (immutable package data)
   __main__.py        # python -m phantadex
-  cli.py             # dex/skip/watch/archive dispatch
+  cli.py             # dex/skip/watch/archive/discover/chrome dispatch
+  chrome.py          # pdex chrome: starts the debug browser
   watch.py           # Watch argument parsing
   archive.py         # bulk Archive mode
   config.py          # Settings dataclass + argparse wiring

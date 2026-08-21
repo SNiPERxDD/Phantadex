@@ -8,7 +8,27 @@ dynamic = ["version"]
 description = "Course traversal, mapping, and archival through an authenticated Chrome session"
 readme = "README.md"
 requires-python = ">=3.8"
+license = { file = "LICENSE" }
+keywords = ["coursera", "playwright", "cdp", "archival", "automation"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Education",
+    "Topic :: Utilities",
+]
 dependencies = ["playwright>=1.40,<2", "plyer>=2,<3", "PyYAML>=6,<7"]
+
+[project.urls]
+Homepage = "https://github.com/SNiPERxDD/course-auto"
+Source = "https://github.com/SNiPERxDD/course-auto"
+Changelog = "https://github.com/SNiPERxDD/course-auto/blob/main/CHANGELOG.md"
+Issues = "https://github.com/SNiPERxDD/course-auto/issues"
 
 [project.scripts]
 phantadex = "phantadex.cli:main"

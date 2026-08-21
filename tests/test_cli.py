@@ -208,8 +208,25 @@ class PackageCliTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        for command in ("dex", "skip", "watch", "archive", "discover"):
+        for command in ("dex", "skip", "watch", "archive", "discover", "chrome"):
             self.assertIn(command, result.stdout)
+
+    def test_chrome_starts_the_debug_browser(self):
+        cli = self._load_cli()
+        with mock.patch.object(cli.chrome, "main", return_value=0) as launcher:
+            self.assertEqual(cli.main(["chrome", "--cdp-url", "http://localhost:9444"]), 0)
+
+        launcher.assert_called_once_with(["--cdp-url", "http://localhost:9444"])
+
+    def test_the_version_flag_reports_the_package_version(self):
+        cli = self._load_cli()
+        stream = io.StringIO()
+        with redirect_stdout(stream):
+            with self.assertRaises(SystemExit) as raised:
+                cli.main(["--version"])
+
+        self.assertEqual(raised.exception.code, 0)
+        self.assertIn(cli.__version__, stream.getvalue())
 
     def test_discover_runs_the_selector_pass_against_the_given_endpoint(self):
         cli = self._load_cli()
