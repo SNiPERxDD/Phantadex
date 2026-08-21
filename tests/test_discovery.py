@@ -571,5 +571,25 @@ class RowTextTests(unittest.TestCase):
         self.assertEqual(row_text.read_lines(row), "")
 
 
+class CoachPracticeTests(unittest.TestCase):
+    """Coursera's AI roleplay practice item, served under ``/coach/``."""
+
+    def test_a_dialogue_row_is_classified_as_an_ungraded_widget(self):
+        self.assertEqual(
+            discovery.classify_sidebar_row(
+                "dialogue", "", "/learn/c/coach/gMS8D/practice-balance-a-marketing-mix"
+            ),
+            "LAB",
+        )
+
+    def test_a_coach_item_is_recognised_from_its_segment_alone(self):
+        # A row whose subtext has not rendered still has to land somewhere
+        # other than UNKNOWN, which made every schema category get tried.
+        self.assertEqual(
+            discovery.classify_sidebar_row("", "", "/learn/c/coach/gMS8D/practice"),
+            "LAB",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

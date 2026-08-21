@@ -23,6 +23,7 @@ ITEM_TYPE_SEGMENTS = frozenset(
         "ungradedwidget",
         "ungradedlti",
         "ungradedlab",
+        "coach",
         "quiz",
         "exam",
         "assignment",

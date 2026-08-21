@@ -37,6 +37,10 @@ URL_SEGMENT_LABELS = {
     "ungradedWidget": LAB,
     "ungradedLti": LAB,
     "ungradedLab": LAB,
+    # Coursera's AI roleplay practice ("Practice: ...", subtext "Dialogue").
+    # Ungraded, and interactive rather than readable, so it is treated as the
+    # other ungraded widgets are rather than being archived as content.
+    "coach": LAB,
     "quiz": QUIZ,
     "exam": QUIZ,
     "assignment": ASSIGNMENT,

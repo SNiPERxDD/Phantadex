@@ -101,6 +101,14 @@ class ItemSegmentTableTests(unittest.TestCase):
         self.assertEqual(urls.item_id("/learn/x/home/week/1"), "")
         self.assertEqual(urls.item_id("/learn/x/lecture/AbCd/intro"), "AbCd")
 
+    def test_a_coach_item_has_an_item_id(self):
+        # Without the segment the id read back empty, so two roleplay items
+        # compared equal and the run could not tell it had moved between them.
+        self.assertEqual(urls.item_id("/learn/x/coach/gMS8D/practice-a"), "gMS8D")
+        self.assertFalse(
+            urls.same_item("/learn/x/coach/gMS8D/practice-a", "/learn/x/coach/tepja/practice-b")
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
