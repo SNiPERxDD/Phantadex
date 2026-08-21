@@ -382,6 +382,9 @@ python run_tests.py --live   # additionally probe a running Chrome session
     policy and never treated as a scrollable reading. Scrolling is limited to an
     overflowing ancestor of the reading body; short readings dwell without wheel
     input, stop at the bottom, and exit immediately if the active item changes.
+*   **Outline:** Row titles and their subtext are read from the element tree, so
+    a module that is collapsed when the map is built still yields the same
+    result as an expanded one.
 *   **Surveys:** An item whose title names a questionnaire about the learner is
     stepped past without dwelling, archiving or answering. The marker is a full
     phrase, so a reading about surveys is still treated as course content.

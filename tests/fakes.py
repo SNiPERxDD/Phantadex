@@ -83,7 +83,11 @@ class FakeLocator:
     def get_attribute(self, name):
         return self._attributes.get(name)
 
-    def evaluate(self, _script):
+    def evaluate(self, script):
+        # The row-text walk reads the element's own text; every other script
+        # the package sends an element asks for its tag name.
+        if "childNodes" in script:
+            return self._text
         return self._tag
 
     def locator(self, selector, has_text=None):

@@ -1,11 +1,13 @@
 """Identity of the page currently open: course, module, item.
 
 Answers "where am I" by reading the sidebar, which is far more accurate than
-the page title. Depends on :mod:`rules` for its labels and on nothing else in
-the package, so the map builder and the prober can both use it.
+the page title. Depends on :mod:`rules` for its labels and :mod:`row_text` for
+reading a row, and on nothing else in the package, so the map builder and the
+prober can both use it.
 """
 
 from .. import logs, urls
+from . import row_text
 
 log = logs.get_logger("discovery.context")
 
@@ -53,7 +55,7 @@ def _active_sidebar_link(page, current_url):
 
 def _split_row(link):
     """Splits a sidebar row into ``(title, subtext)``."""
-    lines = [line.strip() for line in link.inner_text().strip().split("\n") if line.strip()]
+    lines = [line.strip() for line in row_text.read_lines(link).split("\n") if line.strip()]
     if not lines:
         return "Unknown Item", ""
     return lines[0], " | ".join(lines[1:])

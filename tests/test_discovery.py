@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 from phantadex import discovery, element_schema, schema
-from phantadex.discovery import context, course_map, observation, probing, rules
+from phantadex.discovery import context, course_map, observation, probing, row_text, rules
 from phantadex.discovery.state import ObservationState
 from tests.fakes import FakeLocator, FakePage, capture_console
 
@@ -526,6 +526,49 @@ class SmartHopTests(unittest.TestCase):
             capture_console(),
         ):
             self.assertFalse(observation.auto_hop_smart(FakePage(), {}, state))
+
+
+class RowTextTests(unittest.TestCase):
+    """Reading a sidebar row that the page has not laid out.
+
+    The walk itself runs in the browser and is covered by a live check; what
+    is asserted here is the Python around it -- that a row holding no text yet
+    is scrolled and read again, and that an unreadable row is not fatal.
+    """
+
+    def test_a_row_is_read_as_separate_lines(self):
+        row = FakeLocator(count=1, text="Module 4 Overview\nReading. Duration: 20 minutes")
+        self.assertEqual(
+            course_map._row_text(row),
+            "Module 4 Overview\nReading. Duration: 20 minutes",
+        )
+
+    def test_a_collapsed_row_keeps_its_subtext_out_of_its_title(self):
+        # The regression: with the row's two lines run together, the title
+        # swallowed the subtext and the classifier lost its primary signal.
+        row = FakeLocator(
+            count=1,
+            text="Module 4 Overview\nReading. Duration: 20 minutes",
+            attributes={"href": "/learn/demo/supplement/ddd/module-4-overview"},
+        )
+        title, item_type, _href, duration = course_map._parse_lesson(row)
+        self.assertEqual(title, "Module 4 Overview")
+        self.assertEqual(item_type, "READING")
+        self.assertEqual(duration, "20 min")
+
+    def test_a_row_holding_no_text_yet_is_scrolled_and_read_again(self):
+        row = FakeLocator(count=1, text="")
+        row.scroll_into_view_if_needed = mock.Mock(
+            side_effect=lambda: setattr(row, "_text", "Late Row\nVideo. Duration: 2 minutes")
+        )
+        with mock.patch("time.sleep"):
+            self.assertEqual(course_map._row_text(row), "Late Row\nVideo. Duration: 2 minutes")
+        row.scroll_into_view_if_needed.assert_called_once()
+
+    def test_an_unreadable_row_reports_no_text_rather_than_raising(self):
+        row = FakeLocator(count=1)
+        row.evaluate = mock.Mock(side_effect=RuntimeError("detached"))
+        self.assertEqual(row_text.read_lines(row), "")
 
 
 if __name__ == "__main__":

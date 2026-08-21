@@ -7,6 +7,7 @@ hierarchy is recovered by walking that list, not by nesting selectors.
 import time
 
 from .. import interaction, logs, page_ops, urls
+from . import row_text
 from .rules import apply_filler_override, classify_sidebar_row, parse_duration
 
 log = logs.get_logger("discovery.course_map")
@@ -64,19 +65,18 @@ MIN_HEADER_CHARS = 3
 
 
 def _row_text(item):
-    """Reads a row's text, forcing a lazy row to render first."""
-    text = item.inner_text().strip()
+    """Reads a row's text, forcing a row that holds none yet to render first."""
+    text = row_text.read_lines(item)
     if text:
         return text
-    # Lazy rows report empty inner_text until scrolled into view; textContent
-    # sees through that once the node exists.
+    # A virtualized row can hold no text at all until it is scrolled into view.
     try:
         item.scroll_into_view_if_needed()
         time.sleep(0.3)
-        return item.evaluate("el => el.textContent").strip()
     except Exception as exc:
-        log.debug("Item textContent read failed: %s", exc)
+        log.debug("Item scroll failed: %s", exc)
         return ""
+    return row_text.read_lines(item)
 
 
 def _parse_lesson(item):

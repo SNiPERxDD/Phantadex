@@ -34,6 +34,13 @@
   row types and live page classification disagree often enough -- a
   survey-titled supplement maps to `FILLER` but reads as a `READING` -- that a
   file could be written with nothing recording it.
+- Sidebar row text comes from `discovery/row_text.read_lines`, which walks the
+  element and breaks lines at block boundaries. Do not go back to `inner_text()`
+  here: the outline is minified, and `innerText` is specified to fall back to
+  `textContent` for an element that is not being rendered, so a collapsed
+  module's rows return their title and subtext with no separator between them.
+  A regex that strips the subtext off the title is not a substitute -- it leaves
+  the subtext empty, which is the half the classifier actually needs.
 - A survey item is skipped: `detection.SURVEY` is decided from a full-phrase
   title marker ahead of the URL segment (the segment describes the container a
   survey is served in), and `handlers.SurveyHandler` advances without dwelling
