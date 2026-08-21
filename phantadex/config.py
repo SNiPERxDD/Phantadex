@@ -6,6 +6,7 @@ from dataclasses import dataclass
 CDP_URL = "http://localhost:9222"
 TRANSCRIPT_DIR = "phantadex_archive"
 DEFAULT_VIDEO_SKIP_RANGE = "97.5-98.5%"
+DEFAULT_VIDEO_THRESHOLD = 98.0
 DEFAULT_READING_MINUTES = (7, 12)
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 
@@ -19,10 +20,11 @@ class Settings:
     log_level: str = "INFO"
 
     # Fraction of a video that must elapse before advancing (percent).
-    video_completion_threshold: float = 100.0
+    video_completion_threshold: float = DEFAULT_VIDEO_THRESHOLD
     # Optional pre-watch seek, e.g. "97.5-98.5%" or "00:30-01:15". Empty disables.
-    # Default preserved from the pre-refactor script; --no-video-skip turns it off.
-    video_skip_range: str = DEFAULT_VIDEO_SKIP_RANGE
+    # Off by default: a run plays the video through, and seeking to the end of
+    # one is opt-in through --skip.
+    video_skip_range: str = ""
 
     # Reading dwell when the page declares no duration.
     reading_default_minutes: tuple = DEFAULT_READING_MINUTES
@@ -109,17 +111,30 @@ def resolve_log_level(args):
 def add_automation_args(parser):
     """Adds the traversal-only arguments to a parser."""
     parser.add_argument(
-        "--video-skip-range",
-        default=DEFAULT_VIDEO_SKIP_RANGE,
+        "--skip",
+        action="store_true",
         help=(
-            "Seek videos into this range before watching, e.g. '97.5-98.5%%' or "
-            f"'00:30-01:15' (default: {DEFAULT_VIDEO_SKIP_RANGE.replace('%', '%%')})."
+            "Seek each video to the end of its range before watching, instead of "
+            f"playing it through (range: {DEFAULT_VIDEO_SKIP_RANGE.replace('%', '%%')}, "
+            "override with --video-skip-range)."
+        ),
+    )
+    parser.add_argument(
+        "--video-skip-range",
+        default=None,
+        help=(
+            "Range the --skip seek lands in, e.g. '97.5-98.5%%' or '00:30-01:15'. "
+            "Passing this implies --skip."
         ),
     )
     parser.add_argument(
         "--no-video-skip",
         action="store_true",
-        help="Disable the pre-watch seek entirely and play videos through.",
+        help=(
+            "Force the pre-watch seek off. This is the default; the flag is kept "
+            "because it was previously the only way to ask for it, and it "
+            "overrides --skip."
+        ),
     )
     parser.add_argument(
         "--pause-on-graded",
@@ -140,8 +155,11 @@ def add_automation_args(parser):
     parser.add_argument(
         "--video-threshold",
         type=parse_video_threshold,
-        default=100.0,
-        help="Percent of a video that must elapse before advancing (default: 100).",
+        default=DEFAULT_VIDEO_THRESHOLD,
+        help=(
+            "Percent of a video that must elapse before advancing "
+            f"(default: {DEFAULT_VIDEO_THRESHOLD:g})."
+        ),
     )
     parser.add_argument(
         "--reading-minutes",
@@ -151,6 +169,21 @@ def add_automation_args(parser):
         help="Fallback reading dwell range in minutes (default: 7-12).",
     )
     return parser
+
+
+def resolve_skip_range(args):
+    """Returns the pre-watch seek range, or ``""`` when videos play through.
+
+    Seeking is opt-in. Naming a range is taken as asking for it, so
+    ``--video-skip-range`` does not need ``--skip`` beside it, and
+    ``--no-video-skip`` overrides both.
+    """
+    if getattr(args, "no_video_skip", False):
+        return ""
+    named_range = (getattr(args, "video_skip_range", None) or "").strip()
+    if named_range:
+        return named_range
+    return DEFAULT_VIDEO_SKIP_RANGE if getattr(args, "skip", False) else ""
 
 
 def parse_video_threshold(value):
@@ -188,12 +221,8 @@ def settings_from_args(args):
         cdp_url=getattr(args, "cdp_url", CDP_URL),
         transcript_dir=getattr(args, "transcript_dir", TRANSCRIPT_DIR),
         log_level=resolve_log_level(args),
-        video_completion_threshold=getattr(args, "video_threshold", 100.0),
-        video_skip_range=(
-            ""
-            if getattr(args, "no_video_skip", False)
-            else (getattr(args, "video_skip_range", DEFAULT_VIDEO_SKIP_RANGE) or "").strip()
-        ),
+        video_completion_threshold=getattr(args, "video_threshold", DEFAULT_VIDEO_THRESHOLD),
+        video_skip_range=resolve_skip_range(args),
         reading_default_minutes=getattr(args, "reading_minutes", DEFAULT_READING_MINUTES),
         pause_on_graded=getattr(args, "pause_on_graded", False),
         resume_at_incomplete=not getattr(args, "no_resume", False),

@@ -6,8 +6,6 @@ passes it down, so nothing below it has to reach back up for context.
 
 import time
 
-from playwright.sync_api import sync_playwright
-
 from .. import config, interaction, logs, schema, session, urls
 from . import context, course_map, probing
 from .rules import CORE_TYPES
@@ -123,51 +121,52 @@ def _course_tab(browser_context):
 
 def start_dynamic_observation(cdp_url=config.CDP_URL):
     """Watches the attached browser and verifies selectors on every item opened."""
-    logs.nav(f"connecting to {cdp_url}")
     logs.step("observation active; smart-hop navigation engaged")
     logs.step("press Ctrl+C to disconnect")
 
-    session.quiet_node_driver()
     state = ObservationState(selectors=schema.verified_selectors())
+    try:
+        with session.BrowserSession(cdp_url) as browser_session:
+            _observe(browser_session.context, state)
+    except KeyboardInterrupt:
+        logs.interrupted("Session terminated by user.")
+    except Exception as exc:
+        logs.error(f"Session error: {exc}")
+    finally:
+        logs.step("discovery process stopped")
 
-    with sync_playwright() as playwright:
-        try:
-            browser = playwright.chromium.connect_over_cdp(cdp_url)
-            browser_context = browser.contexts[0]
-            last_url = ""
 
-            while True:
-                page = _course_tab(browser_context)
+def _observe(browser_context, state):
+    """Polls the course tab, probing selectors whenever the item changes."""
+    last_url = ""
+    while True:
+        # ``_course_tab`` rather than ``BrowserSession.find_course_page``: that
+        # one raises the tab to the front, which at this poll interval would
+        # take the user's focus away every two seconds.
+        page = _course_tab(browser_context)
 
-                if page:
-                    if not state.mapped:
-                        logs.step("performing the initial course mapping")
-                        get_sidebar_targets(page, state, force_print=True)
+        if page:
+            if not state.mapped:
+                logs.step("performing the initial course mapping")
+                get_sidebar_targets(page, state, force_print=True)
 
-                    current_url = page.url.split("?")[0].split("#")[0]
-                    if current_url != last_url:
-                        # Give the item a moment to render before probing it.
-                        time.sleep(4)
-                        selectors = probing.discover_selectors(page, state)
-                        last_url = current_url
+            current_url = page.url.split("?")[0].split("#")[0]
+            if current_url != last_url:
+                # Give the item a moment to render before probing it.
+                time.sleep(4)
+                selectors = probing.discover_selectors(page, state)
+                last_url = current_url
 
-                        if not auto_hop_smart(page, selectors, state):
-                            logs.ok("discovery objective achieved; closing the session")
-                            break
+                if not auto_hop_smart(page, selectors, state):
+                    logs.ok("discovery objective achieved; closing the session")
+                    return
 
-                        if state.required_types and not missing_types(state):
-                            logs.ok("all identified course types verified; closing the session")
-                            break
-                else:
-                    if last_url != WAITING:
-                        logs.pending("waiting for a course tab")
-                        last_url = WAITING
+                if state.required_types and not missing_types(state):
+                    logs.ok("all identified course types verified; closing the session")
+                    return
+        else:
+            if last_url != WAITING:
+                logs.pending("waiting for a course tab")
+                last_url = WAITING
 
-                time.sleep(2)
-
-        except KeyboardInterrupt:
-            logs.interrupted("Session terminated by user.")
-        except Exception as exc:
-            logs.error(f"Session error: {exc}")
-        finally:
-            logs.step("discovery process stopped")
+        time.sleep(2)

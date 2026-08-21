@@ -4,10 +4,10 @@ import argparse
 import os
 import sys
 
-from . import __version__, archive, chrome, config, discovery, logs, video, watch
+from . import __version__, archive, chrome, config, discovery, logs, processes, video, watch
 from .session import BrowserSession
 
-COMMANDS = ("dex", "skip", "watch", "archive", "discover", "chrome")
+COMMANDS = ("dex", "skip", "watch", "archive", "discover", "chrome", "stop")
 
 
 def _help_parser():
@@ -23,7 +23,7 @@ def _help_parser():
         "command",
         nargs="?",
         choices=COMMANDS,
-        help="dex (default), skip, watch, archive, discover, or chrome",
+        help="dex (default), skip, watch, archive, discover, chrome, or stop",
     )
     parser.add_argument(
         "--version",
@@ -96,6 +96,22 @@ def discover_main(argv=None):
     return 0
 
 
+def stop_main(argv=None):
+    """Terminates every Phantadex process on this machine."""
+    parser = argparse.ArgumentParser(
+        prog="pdex stop",
+        description="Phantadex Stop — end every running Phantadex process.",
+    )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="Show what is running without stopping it.",
+    )
+    args = parser.parse_args(argv)
+    logs.setup("INFO")
+    return processes.list_runs() if args.list else processes.stop_all()
+
+
 def main(argv=None):
     """Dispatches the package CLI; no command defaults to Phantadex Dex."""
     arguments = list(sys.argv[1:] if argv is None else argv)
@@ -120,6 +136,7 @@ def main(argv=None):
         "archive": archive.main,
         "discover": discover_main,
         "chrome": chrome.main,
+        "stop": stop_main,
     }
     try:
         return handlers[command](arguments)

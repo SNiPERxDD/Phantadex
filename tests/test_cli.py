@@ -138,17 +138,38 @@ class PackageCliTests(unittest.TestCase):
         self.assertGreaterEqual(page.seek_target, 180.0)
         self.assertLessEqual(page.seek_target, 190.0)
 
-    def test_watch_preserves_random_seek_and_full_completion_defaults(self):
+    def _watch_settings(self, *argv):
+        """Runs ``pdex watch`` with the runner stubbed and returns the settings."""
         cli = self._load_cli()
         captured = []
 
         with mock.patch.object(cli.watch.runner, "run", side_effect=captured.append):
-            result = cli.main(["watch"])
+            result = cli.main(["watch", *argv])
 
         self.assertEqual(result, 0)
-        self.assertEqual(captured[0].video_skip_range, "97.5-98.5%")
-        self.assertEqual(captured[0].video_completion_threshold, 100.0)
-        self.assertEqual(captured[0].reading_default_minutes, (7, 12))
+        return captured[0]
+
+    def test_watch_plays_videos_through_by_default(self):
+        settings = self._watch_settings()
+
+        self.assertEqual(settings.video_skip_range, "")
+        self.assertEqual(settings.video_completion_threshold, 98.0)
+        self.assertEqual(settings.reading_default_minutes, (7, 12))
+
+    def test_watch_skip_flag_turns_the_seek_on(self):
+        settings = self._watch_settings("--skip")
+
+        self.assertEqual(settings.video_skip_range, "97.5-98.5%")
+
+    def test_naming_a_range_implies_the_skip(self):
+        settings = self._watch_settings("--video-skip-range", "90-95%")
+
+        self.assertEqual(settings.video_skip_range, "90-95%")
+
+    def test_no_video_skip_overrides_the_skip_flag(self):
+        settings = self._watch_settings("--skip", "--no-video-skip")
+
+        self.assertEqual(settings.video_skip_range, "")
 
     def test_watch_accepts_custom_reading_minute_range(self):
         cli = self._load_cli()
@@ -247,6 +268,25 @@ class PackageCliTests(unittest.TestCase):
             cli.main(["discover", "-v"])
 
         setup.assert_called_once_with("DEBUG")
+
+    def test_stop_terminates_every_running_process(self):
+        cli = self._load_cli()
+        with mock.patch.object(cli.processes, "stop_all", return_value=0) as stop_all:
+            result = cli.main(["stop"])
+
+        self.assertEqual(result, 0)
+        stop_all.assert_called_once_with()
+
+    def test_stop_list_only_reports(self):
+        cli = self._load_cli()
+        with (
+            mock.patch.object(cli.processes, "stop_all", side_effect=AssertionError("stopped")),
+            mock.patch.object(cli.processes, "list_runs", return_value=0) as list_runs,
+        ):
+            result = cli.main(["stop", "--list"])
+
+        self.assertEqual(result, 0)
+        list_runs.assert_called_once_with()
 
     def test_full_alias_names_itself_in_help(self):
         cli = self._load_cli()

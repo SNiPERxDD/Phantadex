@@ -36,7 +36,8 @@ Product vocabulary:
 5.  **Item Handling:** One handler per content type, dispatched from
     `detection.classify(page)`:
     *   **Video:** Watches to the configured completion threshold, or to the
-        player's own `ended` event.
+        player's own `ended` event. The whole video plays unless `--skip` is
+        passed.
     *   **Reading:** Dwells for the item's listed duration while scrolling the
         content pane, then marks complete.
     *   **Discussion:** Archives the prompt and advances. No reply is composed
@@ -184,6 +185,16 @@ Sign in to the course in that window, then leave it open.
     pdex discover -v
     ```
 
+    **Option F: Phantadex Stop**
+    Ends every Phantadex process on the machine, wherever it was started from.
+    Each is asked to exit first and killed only if it does not. The command
+    never targets itself or the shell that launched it.
+    ```bash
+    pdex stop
+    # See what is running without stopping it
+    pdex stop --list
+    ```
+
 `phantadex` and `pdex` are identical installed commands. The root
 `phantadex_watch.py` and `phantadex_archive.py` scripts remain compatibility
 entry points.
@@ -200,7 +211,7 @@ phantadex_archive.py  # compatibility wrapper for pdex archive
 phantadex/
   config.yaml         # shipped selector defaults (immutable package data)
   __main__.py        # python -m phantadex
-  cli.py             # dex/skip/watch/archive/discover/chrome dispatch
+  cli.py             # dex/skip/watch/archive/discover/chrome/stop dispatch
   chrome.py          # pdex chrome: starts the debug browser
   watch.py           # Watch argument parsing
   archive.py         # bulk Archive mode
@@ -221,6 +232,7 @@ phantadex/
   modals.py          # data-driven modal dismissal rules
   navigation.py      # advance(): Next button with ledger fallback
   page_ops.py        # transcript + reading extraction
+  processes.py       # pdex stop: finds and ends running Phantadex processes
   prompt.py          # cross-platform timed y/n prompt
   runner.py          # the main traversal loop
   schema.py          # selector lookups: learned state, packaged defaults, built-ins
@@ -255,12 +267,17 @@ source. Both entry points share the connection flags:
 
 `pdex watch` adds:
 
-*   `--video-skip-range` — seek videos into this range before watching, e.g.
-    `97.5-98.5%` or `00:30-01:15` (default `97.5-98.5%`).
-*   `--no-video-skip` — disable the pre-watch seek and play videos through.
+*   `--skip` — seek each video into `97.5-98.5%` before watching, instead of
+    playing it through. Off by default: a run watches the whole video.
+*   `--video-skip-range` — the range `--skip` seeks into, e.g. `97.5-98.5%` or
+    `00:30-01:15`. Passing it implies `--skip`.
+*   `--no-video-skip` — force the seek off. This is the default; the flag is
+    kept because it used to be the only way to ask for it, and it overrides
+    `--skip`.
 *   `--video-threshold` — percent of a video that must elapse before advancing,
-    between `0` and `100` (default `100`). This value is the target; playback
-    variation comes from `--video-skip-range`, which is randomized by design.
+    between `0` and `100` (default `98`). This value is the target; when
+    `--skip` is on, playback variation comes from `--video-skip-range`, which is
+    randomized by design.
 *   `--reading-minutes MIN[-MAX]` — fallback reading dwell in whole minutes,
     either fixed (`5`) or randomized (`7-12`, the default).
 *   `--pause-on-graded` — stop on a graded quiz or peer assignment and wait for
@@ -271,7 +288,11 @@ source. Both entry points share the connection flags:
     complete, instead of stepping through finished work to reach it.
 
 `pdex skip` accepts `--video-skip-range` and uses the same random range parser
-as Watch. `pdex archive` adds `--force` to re-scrape already-archived items.
+as Watch; seeking is the whole point of that command, so it always seeks.
+`pdex archive` adds `--force` to re-scrape already-archived items.
+
+`pdex stop` accepts `--list`, which reports the running processes without
+stopping any of them.
 
 ### Selectors
 
