@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from . import (
     detection,
     interaction,
+    jitter,
     logs,
     modals,
     navigation,
@@ -31,6 +32,8 @@ COURSE_COMPLETE = "COURSE_COMPLETE"
 # does not cover that state, so the watch loop bounds it explicitly.
 POSITION_EPSILON = 0.05
 FROZEN_TICK_LIMIT = 90
+# Pause after a video meets its target, before the run advances.
+POST_TARGET_DWELL_RANGE = (2.0, 4.0)
 # Sub-minute dwell for an external resource that only needs its box ticked.
 PLUGIN_DWELL_MINUTES = 0.5
 # A graded quiz counts as cleared only after this many consecutive absent
@@ -181,7 +184,7 @@ class VideoHandler(BaseHandler):
                 if percent >= target:
                     logs.bar_done()
                     logs.ok(f"reached {target}% target")
-                    time.sleep(random.uniform(2, 4))
+                    time.sleep(jitter.duration(*POST_TARGET_DWELL_RANGE))
                     return
 
             self._idle_fidget(page)

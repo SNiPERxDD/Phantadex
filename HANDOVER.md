@@ -12,6 +12,12 @@
   `os.kill(pid, 0)` is not a liveness probe on Windows -- signal 0 is
   `CTRL_C_EVENT` and interrupts the caller's own console group; the Win32
   handle is read instead.
+- Observable delays are drawn from `phantadex/jitter.py`, a log-normal over the
+  requested span with a 4% chance of a longer pause, rather than a uniform
+  draw. Its mean matches the uniform draw it replaced, so run pace is
+  unchanged. Percentages and pixel offsets stay uniform on purpose. Callers
+  sleep on the returned value themselves, so tests that patch a caller's
+  `time.sleep` still work.
 - Watch plays videos through by default (`--skip` restores the seek into
   `97.5-98.5%`), and its completion target is sampled once per video from
   `--video-threshold`, which defaults to `98-100`. `Settings` normalises a bare

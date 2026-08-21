@@ -10,7 +10,7 @@ import logging
 import random
 import time
 
-from . import logs, modals, timing, urls
+from . import jitter, logs, modals, timing, urls
 
 log = logs.get_logger("interaction")
 
@@ -23,6 +23,8 @@ CLICK_TIMEOUT_MS = 5000
 MINIMUM_DWELL_MINUTES = 1.0
 VIEWPORT_MARGIN = 120
 BOTTOM_TOLERANCE = 40
+# Gap between scroll passes during a reading dwell.
+READING_PAUSE_RANGE = (2.5, 6.0)
 
 # Nearest overflowing ancestor of the reading body. A page-wide search can
 # select the independent course sidebar when the reading itself is short.
@@ -117,7 +119,7 @@ def click(page, locator, force=False, reaction_range=(0.4, 0.9), timeout=CLICK_T
 
         move(page, box["x"] + offset_x, box["y"] + offset_y)
         locator.hover(force=force, position=position, timeout=timeout)
-        time.sleep(random.uniform(*reaction_range))
+        time.sleep(jitter.duration(*reaction_range))
         locator.click(force=force, position=position, timeout=timeout)
         log.debug(
             "clicked %s at (%.0f, %.0f)%s",
@@ -303,7 +305,7 @@ def reading_session(page, metadata_wait_min):
                 logs.nav("page changed; ending reading session")
                 return "NAVIGATED"
 
-            time.sleep(random.uniform(2.5, 6.0))
+            time.sleep(jitter.duration(*READING_PAUSE_RANGE))
             elapsed = time.time() - start_time
             logs.bar(elapsed / duration_sec, _caption(metrics, duration_sec - elapsed))
 

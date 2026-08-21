@@ -228,6 +228,7 @@ phantadex/
   element_schema.py  # ELEMENTS_SCHEMA: the built-in selector candidates
   handlers.py        # one handler class per content type
   interaction.py     # mouse / scroll / reading-session pacing
+  jitter.py          # human-shaped delays for the observable timing sites
   logs.py            # tree-style formatter over the stdlib logging module
   modals.py          # data-driven modal dismissal rules
   navigation.py      # advance(): Next button with ledger fallback

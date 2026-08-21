@@ -8,16 +8,19 @@ it only visits mapped items and extracts their text.
     python phantadex_archive.py --force
 """
 
-import random
 import sys
 import time
 
-from . import config, logs, modals, page_ops, urls
+from . import config, jitter, logs, modals, page_ops, urls
 from .course_manager import CourseManager
 from .discovery import get_detailed_course_map, get_robust_course_name
 from .session import BrowserSession
 
 log = logs.get_logger("archiver")
+
+# Settling time after opening an item, and the gap left between items.
+ITEM_SETTLE_RANGE = (2.0, 4.0)
+BETWEEN_ITEMS_RANGE = (1.0, 3.0)
 
 ARCHIVABLE = {"VIDEO": "Transcript", "READING": "Reading"}
 
@@ -42,7 +45,7 @@ def archive_item(page, manager, title, item_type, url):
         log.warning("Navigation to %s failed: %s", title, exc)
         return False
 
-    time.sleep(random.uniform(2, 4))
+    time.sleep(jitter.duration(*ITEM_SETTLE_RANGE))
     modals.dismiss_all(page)
 
     if item_type == "VIDEO":
@@ -104,7 +107,7 @@ def run(settings, force=False):
                 succeeded += 1
             else:
                 failed += 1
-            time.sleep(random.uniform(1, 3))
+            time.sleep(jitter.duration(*BETWEEN_ITEMS_RANGE))
 
         logs.banner(f"Done. {succeeded} archived, {skipped} skipped, {failed} failed.")
         return 0 if failed == 0 else 2
