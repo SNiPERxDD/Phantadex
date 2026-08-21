@@ -16,6 +16,7 @@ ASSIGNMENT = "ASSIGNMENT"
 PLUGIN = "PLUGIN"
 READING = "READING"
 DISCUSSION = "DISCUSSION"
+SURVEY = "SURVEY"
 UNKNOWN = "UNKNOWN"
 
 # Coursera routes each item type through its own URL path segment. The segment
@@ -63,6 +64,22 @@ ASSIGNMENT_TITLES = (
 )
 GRADED_PHRASES = ("Graded Assignment", "weighted heavily")
 
+# Titles that identify a questionnaire about the learner rather than course
+# content. Each is a full phrase: a bare "survey" would also match a reading
+# titled "A Survey of Reinforcement Learning", which is course content and is
+# archived like any other. Surveys are served under the same URL segments as
+# readings and plugins, so the title is the only thing that separates them.
+SURVEY_TITLES = (
+    "demographics survey",
+    "course survey",
+    "entry survey",
+    "exit survey",
+    "pre-course survey",
+    "post-course survey",
+    "how was the course",
+    "tell us about yourself",
+)
+
 
 def classify(page):
     """Returns one of the module-level page-type constants.
@@ -75,12 +92,20 @@ def classify(page):
     which then hunted for a transcript and watched a player that was not the
     item.
 
+    The one thing checked ahead of the segment is a survey title; see below.
+
     Text heuristics are the last resort. They used to run first and classified
     every plugin, discussion and assignment on this account's course as
     ``READING`` -- see :func:`_looks_like_reading`.
     """
     title = _safe_title(page)
     title_lower = title.lower()
+
+    # Ahead of the segment, which is the one exception to the order above: a
+    # survey is served as a supplement or a widget, so the segment names its
+    # container rather than what it asks for.
+    if any(phrase in title_lower for phrase in SURVEY_TITLES):
+        return SURVEY
 
     from_url = type_from_url(_safe_url(page))
     if from_url != UNKNOWN:

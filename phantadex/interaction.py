@@ -259,24 +259,57 @@ _MEDIA_GUARD_JS = (
         element.muted = true;
         element.volume = 0;
     };
+    const onMediaEvent = (event) => silence(event.target);
     const events = ['loadstart', 'loadedmetadata', 'canplay', 'play', 'playing',
                     'volumechange'];
     for (const type of events) {
-        document.addEventListener(type, (event) => silence(event.target), true);
+        document.addEventListener(type, onMediaEvent, true);
     }
     // Programmatic playback can start without any of those events having been
     // seen yet, so the entry point itself is covered too.
-    const play = HTMLMediaElement.prototype.play;
-    HTMLMediaElement.prototype.play = function () {
+    const nativePlay = HTMLMediaElement.prototype.play;
+    const play = function () {
         silence(this);
-        return play.apply(this, arguments);
+        return nativePlay.apply(this, arguments);
     };
+    // The wrapper answers about itself the way the method it stands in for
+    // would. A player that reads back `play.name` or `String(play)` -- to
+    // re-wrap it, or to check nothing else has -- otherwise sees a stranger.
+    const nativeToString = Function.prototype.toString;
+    Object.defineProperty(play, 'name', { value: 'play', configurable: true });
+    Object.defineProperty(play, 'toString', {
+        value: function () { return nativeToString.call(nativePlay); },
+        configurable: true,
+        writable: true,
+    });
+    HTMLMediaElement.prototype.play = play;
     document.querySelectorAll('audio, video').forEach(silence);
-    window.__phantadexMediaGuard = true;
+    window.__phantadexMediaGuard = {
+        release: () => {
+            for (const type of events) {
+                document.removeEventListener(type, onMediaEvent, true);
+            }
+            HTMLMediaElement.prototype.play = nativePlay;
+            delete window.__phantadexMediaGuard;
+            return true;
+        },
+    };
     return true;
 })();
 """
 )
+
+# Undoes the guard in a document that outlives the run. Elements are left as
+# they are: a tab that was muted stays muted, and the user may raise the volume
+# themselves. Restoring the volume here would put sound through a speaker
+# nobody asked to be sitting at.
+_MEDIA_RELEASE_JS = """
+(() => {
+    const guard = window.__phantadexMediaGuard;
+    if (!guard || typeof guard.release !== 'function') return false;
+    return guard.release();
+})();
+"""
 
 
 def install_media_guard(context):
@@ -286,6 +319,20 @@ def install_media_guard(context):
         return True
     except Exception as exc:
         log.debug("Could not install the media guard: %s", exc)
+        return False
+
+
+def release_media_guard(page):
+    """Removes the guard from a document, leaving current media as it is.
+
+    A tab lives on after the run that armed it. Without this the page keeps a
+    wrapped ``play`` and re-mutes anything the user unmutes by hand until they
+    reload it.
+    """
+    try:
+        return bool(page.evaluate(_MEDIA_RELEASE_JS))
+    except Exception as exc:
+        log.debug("Could not release the media guard: %s", exc)
         return False
 
 

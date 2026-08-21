@@ -34,6 +34,15 @@
   row types and live page classification disagree often enough -- a
   survey-titled supplement maps to `FILLER` but reads as a `READING` -- that a
   file could be written with nothing recording it.
+- A survey item is skipped: `detection.SURVEY` is decided from a full-phrase
+  title marker ahead of the URL segment (the segment describes the container a
+  survey is served in), and `handlers.SurveyHandler` advances without dwelling
+  or archiving.
+- The media guard is released by `BrowserSession.__exit__`
+  (`interaction.release_media_guard`), which restores
+  `HTMLMediaElement.prototype.play` and drops the listeners. Media is left
+  muted as it stands; the user can raise the volume and it holds. The wrapper
+  reports the native `name` and `toString` while installed.
 - The demographics survey is declined, never submitted: `MODAL_RULES` lists
   only declining controls for it. A modal whose heading is on screen but whose
   listed controls are absent is warned about once per heading

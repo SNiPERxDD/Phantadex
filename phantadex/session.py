@@ -63,6 +63,7 @@ class BrowserSession:
                 log.debug("Could not arm the media guard on a tab: %s", exc)
 
     def __exit__(self, exc_type, exc, traceback):
+        self._release_media()
         self._disconnect_browser()
         if self._playwright is not None:
             try:
@@ -71,6 +72,17 @@ class BrowserSession:
                 log.debug("Playwright shutdown failed: %s", stop_exc)
             self._playwright = None
         return False
+
+    def _release_media(self):
+        """Hands muting back to the user in tabs that outlive this session."""
+        if self.context is None:
+            return
+        for page in self.context.pages:
+            try:
+                if urls.PLATFORM_HOST in page.url:
+                    interaction.release_media_guard(page)
+            except Exception as exc:
+                log.debug("Could not release the media guard on a tab: %s", exc)
 
     def _disconnect_browser(self):
         """Disconnects the CDP client without closing the external Chrome process."""

@@ -382,7 +382,11 @@ python run_tests.py --live   # additionally probe a running Chrome session
     policy and never treated as a scrollable reading. Scrolling is limited to an
     overflowing ancestor of the reading body; short readings dwell without wheel
     input, stop at the bottom, and exit immediately if the active item changes.
-*   **Modals:** Interstitials are cleared through controls that decline them.
+*   **Surveys:** An item whose title names a questionnaire about the learner is
+    stepped past without dwelling, archiving or answering. The marker is a full
+    phrase, so a reading about surveys is still treated as course content.
+*   **Modals:** Interstitials are cleared through controls that decline them,
+    matched by visible text or `aria-label` so an icon-only close button counts.
     The demographics survey is skipped rather than submitted, since submitting
     it would answer questions about the user without them present. A modal that
     offers no such control is reported once and left alone.
@@ -390,7 +394,9 @@ python run_tests.py --live   # additionally probe a running Chrome session
     scripts, so a player is silent from `loadstart` rather than from the next
     poll, and an attempt to raise the volume afterwards is undone. The guard is
     limited to the platform host because it is installed on the browser profile
-    the user is already using.
+    the user is already using, and it is removed again when the run detaches:
+    the tab outlives the run, and media left under the guard would refuse to be
+    unmuted by hand until the page was reloaded.
 *   **Ledger Completeness:** An item that is archived but absent from the ledger
     is added to it, under the module the course map gives it or a catch-all
     module when the URL is unmapped. Row types and live page classification can

@@ -264,6 +264,24 @@ class MediaGuardTests(unittest.TestCase):
         self.assertIn("loadstart", interaction._MEDIA_GUARD_JS)
         self.assertIn("HTMLMediaElement.prototype.play", interaction._MEDIA_GUARD_JS)
 
+    def test_the_guard_can_be_taken_back_off(self):
+        self.assertIn("release", interaction._MEDIA_GUARD_JS)
+        self.assertIn("removeEventListener", interaction._MEDIA_GUARD_JS)
+        self.assertIn("HTMLMediaElement.prototype.play = nativePlay", interaction._MEDIA_GUARD_JS)
+        page = mock.Mock()
+        page.evaluate.return_value = True
+        self.assertTrue(interaction.release_media_guard(page))
+        page.evaluate.assert_called_once_with(interaction._MEDIA_RELEASE_JS)
+
+    def test_the_wrapped_play_answers_about_itself_as_the_native_one_does(self):
+        self.assertIn("'name', { value: 'play'", interaction._MEDIA_GUARD_JS)
+        self.assertIn("nativeToString.call(nativePlay)", interaction._MEDIA_GUARD_JS)
+
+    def test_releasing_a_page_without_the_guard_is_not_an_error(self):
+        page = mock.Mock()
+        page.evaluate.side_effect = RuntimeError("closed")
+        self.assertFalse(interaction.release_media_guard(page))
+
     def test_arming_reports_whether_this_call_installed_it(self):
         page = mock.Mock()
         page.evaluate.return_value = True

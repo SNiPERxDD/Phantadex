@@ -30,6 +30,7 @@ class DispatchTests(unittest.TestCase):
             detection.PLUGIN: handlers.PluginHandler,
             detection.ASSIGNMENT: handlers.AssignmentHandler,
             detection.DISCUSSION: handlers.DiscussionHandler,
+            detection.SURVEY: handlers.SurveyHandler,
         }
         for page_type, cls in expected.items():
             self.assertIsInstance(handlers.for_page_type(page_type), cls, page_type)
@@ -76,6 +77,18 @@ class HandlerBehaviourTests(unittest.TestCase):
             handlers.PluginHandler().handle(self.page, self.ctx)
         mark.assert_not_called()
         self.advance.assert_called_once()
+
+    def test_survey_advances_without_answering_or_archiving_it(self):
+        with (
+            mock.patch.object(handlers.navigation, "mark_complete") as mark,
+            mock.patch.object(handlers.interaction, "reading_session") as dwell,
+        ):
+            result = handlers.SurveyHandler().handle(self.page, self.ctx)
+        mark.assert_not_called()
+        dwell.assert_not_called()
+        self.assertEqual(self.ctx.manager.saved, [])
+        self.advance.assert_called_once()
+        self.assertEqual(result, handlers.CONTINUE)
 
     def test_assignment_advances_without_submitting_anything(self):
         with mock.patch.object(handlers.navigation, "mark_complete") as mark:

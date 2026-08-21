@@ -178,3 +178,21 @@ class SegmentLabelTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SurveyClassificationTests(unittest.TestCase):
+    def test_a_survey_is_recognised_through_its_container_segment(self):
+        # Served as a supplement, so the segment says READING; the run must not
+        # dwell on it or archive it as course content.
+        page = page_with(
+            title="Demographics Survey | Coursera",
+            url="https://www.coursera.org/learn/demo/supplement/aaa/demographics",
+        )
+        self.assertEqual(detection.classify(page), detection.SURVEY)
+
+    def test_a_reading_about_surveys_is_still_a_reading(self):
+        page = page_with(
+            title="A Survey of Reinforcement Learning | Coursera",
+            url="https://www.coursera.org/learn/demo/supplement/bbb/rl-survey",
+        )
+        self.assertEqual(detection.classify(page), detection.READING)

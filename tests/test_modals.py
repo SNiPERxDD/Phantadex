@@ -56,6 +56,17 @@ class DismissTests(unittest.TestCase):
         self.assertEqual(modals.dismiss_all(page), 1)
         self.assertEqual(skip.clicked, 1)
 
+    def test_an_icon_only_close_control_is_found_by_its_label(self):
+        close = FakeLocator(count=1)
+        page = FakePage(
+            locators={
+                "h1, h2|Demographics Survey": FakeLocator(count=1),
+                "button[aria-label='Close']": close,
+            }
+        )
+        self.assertEqual(modals.dismiss_all(page), 1)
+        self.assertEqual(close.clicked, 1)
+
     def test_an_unclearable_modal_is_reported_once(self):
         page = FakePage(locators={"h1, h2|Demographics Survey": FakeLocator(count=1)})
         with mock.patch.object(modals.logs, "warn") as warn:

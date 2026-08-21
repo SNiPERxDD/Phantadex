@@ -40,7 +40,7 @@ MODAL_RULES = (
     (
         "Demographics Survey",
         "h1, h2",
-        ("Skip", "Skip for now", "No thanks", "Not now", "Maybe later"),
+        ("Skip", "Skip for now", "No thanks", "Not now", "Maybe later", "Close"),
         "demographics survey declined",
         None,
     ),
@@ -95,10 +95,7 @@ def _dismiss_one(page, heading, heading_selector, button_labels, message, scope=
     if root is page:
         root = _nearest_button_container(header, page)
 
-    for label in button_labels:
-        # Scoped to `root` so a scoped rule can never reach a same-named button
-        # elsewhere on the page.
-        button = root.locator(f"button:has-text('{label}')").first
+    for label, button in _candidate_buttons(root, button_labels):
         try:
             if button.count() > 0 and button.is_visible():
                 # Lazy import avoids the interaction -> modals module cycle.
@@ -131,6 +128,18 @@ def _report_stall(heading, button_labels):
     _REPORTED_STALLS.add(heading)
     labels = ", ".join(repr(label) for label in button_labels)
     logs.warn(f"'{heading}' is on screen and none of {labels} is available; it is yours to clear")
+
+
+def _candidate_buttons(root, button_labels):
+    """Yields ``(label, locator)`` for each way a label can name a control.
+
+    Scoped to ``root`` so a scoped rule can never reach a same-named button
+    elsewhere on the page. The aria-label form is what an icon-only control
+    answers to: a dialog's close button is usually an X with no text in it.
+    """
+    for label in button_labels:
+        for selector in (f"button:has-text('{label}')", f"button[aria-label='{label}']"):
+            yield label, root.locator(selector).first
 
 
 def _nearest_button_container(header, page):

@@ -128,8 +128,18 @@ class MediaGuardTests(unittest.TestCase):
         course = mock.Mock(url="https://www.coursera.org/learn/demo/lecture/aaa/welcome")
         elsewhere = mock.Mock(url="https://example.com/watch")
         self._attach(FakeContext(pages=[course, elsewhere]))
-        course.evaluate.assert_called_once_with(interaction._MEDIA_GUARD_JS)
+        self.assertEqual(
+            [call.args[0] for call in course.evaluate.call_args_list],
+            [interaction._MEDIA_GUARD_JS, interaction._MEDIA_RELEASE_JS],
+        )
         elsewhere.evaluate.assert_not_called()
+
+    def test_leaving_the_session_hands_muting_back(self):
+        # The tab outlives the run. A guard left in place would keep re-muting
+        # anything the user unmutes until they reload the page.
+        course = mock.Mock(url="https://www.coursera.org/learn/demo/lecture/aaa/welcome")
+        self._attach(FakeContext(pages=[course]))
+        self.assertEqual(course.evaluate.call_args.args[0], interaction._MEDIA_RELEASE_JS)
 
 
 class EntryPointTests(unittest.TestCase):

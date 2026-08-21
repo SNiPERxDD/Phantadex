@@ -340,6 +340,18 @@ class AssignmentHandler(PluginHandler):
         return CONTINUE
 
 
+class SurveyHandler(BaseHandler):
+    """Steps past a questionnaire about the learner without answering it."""
+
+    page_type = detection.SURVEY
+    content_type = None
+
+    def handle(self, page, ctx):
+        ctx.announce("survey", "survey -- not answered")
+        logs.step("stepping past it; it asks about you, not the course")
+        return self.advance(page, ctx, page.url)
+
+
 class DiscussionHandler(BaseHandler):
     """Archives the prompt and advances. Does not compose or submit a reply."""
 
@@ -372,6 +384,7 @@ HANDLERS = {
         PluginHandler(),
         AssignmentHandler(),
         DiscussionHandler(),
+        SurveyHandler(),
     )
 }
 
