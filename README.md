@@ -53,8 +53,10 @@ The system requires an initialized debugging interface on the host browser.
 
 ### A. Environment
 *   **Python:** 3.8+
-*   **Dependencies:** `playwright`, `plyer`
-*   **Browser:** Google Chrome (Chromium)
+*   **Dependencies:** `playwright`, `plyer`, `PyYAML` -- all three are declared in
+    `pyproject.toml`, so `pip install -e .` pulls them in.
+*   **Browser:** Google Chrome. The tool attaches to the browser you already use
+    and never launches its own, so Playwright's bundled browsers are not needed.
 
 ### B. Installation
 
@@ -73,11 +75,14 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned -Force
 # 4. Activate the environment
 .\.venv\Scripts\Activate.ps1
 
-# 5. Install dependencies
-pip install -r requirements.txt
+# 5. Install the package and its dependencies
 pip install -e .
-playwright install chromium
 ```
+
+`pdex` is on the PATH once the environment is active. Reactivate it in every new
+terminal with `.\.venv\Scripts\Activate.ps1` -- step 3 only applies to the
+session that runs it, so a fresh PowerShell window needs it again before the
+activation script will run.
 
 **macOS / Linux:**
 ```bash
@@ -85,9 +90,7 @@ git clone https://github.com/SNiPERxDD/course-auto.git
 cd course-auto
 python3 -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
 pip install -e .
-playwright install chromium
 ```
 
 ### C. Launch Configuration (Mandatory)
@@ -103,8 +106,13 @@ python3 scripts/start_chrome_debug.py
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222 --user-data-dir="/tmp/chrome_dev"
 ```
 
+**Linux (manual):** the launcher script covers macOS and Windows only.
+```bash
+google-chrome --remote-debugging-port=9222 --user-data-dir="/tmp/chrome_dev"
+```
+
 **Windows (PowerShell):**
-Use the cross-platform launcher. The manual commands remain fallbacks.
+Use the launcher. The manual commands remain fallbacks.
 
 ```powershell
 # Recommended
@@ -116,6 +124,13 @@ python scripts/start_chrome_debug.py
 # Option 2: Alternative (x86) Installation
 & "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="C:\chrome_dev"
 ```
+
+The launcher keeps its own Chrome profile in `chrome_profile/` inside the
+repository, so the first run starts signed out and the courses have to be logged
+into once. The manual commands above use a throwaway profile for the same
+reason; point `--user-data-dir` at a directory you keep if you would rather log
+in only once. Set `PHANTADEX_CHROME` when Chrome is installed somewhere the
+launcher does not look.
 
 ## 3. Execution Protocol
 

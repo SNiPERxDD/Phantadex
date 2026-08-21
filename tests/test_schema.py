@@ -50,8 +50,18 @@ class VerifiedSelectorTests(unittest.TestCase):
         self.assertNotIn(package_dir, state_path.parents)
 
     def test_state_dir_honours_the_environment_override(self):
-        with mock.patch.dict(os.environ, {schema.STATE_DIR_ENV: "/tmp/pdex-state"}):
-            self.assertEqual(schema.state_dir(), "/tmp/pdex-state")
+        # A POSIX literal was asserted here verbatim, which fails on Windows:
+        # ``os.path.abspath`` resolves a rooted path against the current drive,
+        # so "/tmp/pdex-state" comes back as "D:\tmp\pdex-state".
+        override = os.path.join(tempfile.gettempdir(), "pdex-state")
+        with mock.patch.dict(os.environ, {schema.STATE_DIR_ENV: override}):
+            self.assertEqual(schema.state_dir(), os.path.abspath(override))
+
+    def test_a_relative_override_is_made_absolute(self):
+        with mock.patch.dict(os.environ, {schema.STATE_DIR_ENV: "pdex-state"}):
+            resolved = schema.state_dir()
+        self.assertTrue(os.path.isabs(resolved))
+        self.assertEqual(os.path.basename(resolved), "pdex-state")
 
     def test_verified_selector_is_tried_before_the_builtin_defaults(self):
         # Regression: discovery wrote its findings and nothing read them back, so
