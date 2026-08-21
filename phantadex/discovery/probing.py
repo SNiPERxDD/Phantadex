@@ -111,6 +111,7 @@ RELEVANT_CATEGORIES = {
     "QUIZ": _COMMON,
     "ASSIGNMENT": _COMMON,
     "LAB": _COMMON,
+    "UNGRADED_PLUGIN": _COMMON,
     "DIALOGUE": ("dialogue",) + _COMMON,
     "DISCUSSION": ("content",) + _COMMON,
 }

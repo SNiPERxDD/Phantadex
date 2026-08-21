@@ -1,41 +1,30 @@
 """Unified Phantadex command line with ``phantadex`` and ``pdex`` aliases."""
 
 import argparse
-import os
 import sys
 
-from . import __version__, archive, chrome, config, discovery, logs, processes, video, watch
+from . import (
+    __version__,
+    archive,
+    chrome,
+    config,
+    discovery,
+    logs,
+    overview,
+    processes,
+    video,
+    watch,
+)
 from .session import BrowserSession
 
-COMMANDS = ("dex", "skip", "watch", "archive", "discover", "chrome", "stop")
-
-
-def _help_parser():
-    """Builds the small top-level command chooser."""
-    program_name = os.path.basename(sys.argv[0])
-    if program_name not in {"phantadex", "pdex"}:
-        program_name = "pdex"
-    parser = argparse.ArgumentParser(
-        prog=program_name,
-        description="Phantadex course companion.",
-    )
-    parser.add_argument(
-        "command",
-        nargs="?",
-        choices=COMMANDS,
-        help="dex (default), skip, watch, archive, discover, chrome, or stop",
-    )
-    parser.add_argument(
-        "--version",
-        action="version",
-        version=f"phantadex {__version__}",
-    )
-    return parser
+# One source for the command list: the overview documents each of them, and a
+# command missing from it would be dispatchable but unmentioned by ``-h``.
+COMMANDS = tuple(overview.COMMAND_SUMMARIES)
 
 
 def dex_main(argv=None):
     """Prints the active course tree without navigating or writing a ledger."""
-    parser = config.build_parser("Phantadex Dex — show the active course tree.")
+    parser = config.build_parser("Phantadex Dex — show the active course tree.", "dex")
     settings = config.settings_from_args(parser.parse_args(argv))
     logs.setup(settings.log_level)
 
@@ -60,7 +49,7 @@ def dex_main(argv=None):
 
 def skip_main(argv=None):
     """Seeks the active video once to a random point in the configured range."""
-    parser = config.build_parser("Phantadex Skip — seek the active video once.")
+    parser = config.build_parser("Phantadex Skip — seek the active video once.", "skip")
     parser.add_argument(
         "--video-skip-range",
         default=config.DEFAULT_VIDEO_SKIP_RANGE,
@@ -88,7 +77,7 @@ def discover_main(argv=None):
     layered over the packaged defaults on the next run.
     """
     parser = config.build_parser(
-        "Phantadex Discover -- re-verify selectors against the live course."
+        "Phantadex Discover -- re-verify selectors against the live course.", "discover"
     )
     settings = config.settings_from_args(parser.parse_args(argv))
     logs.setup(settings.log_level)
@@ -99,7 +88,7 @@ def discover_main(argv=None):
 def stop_main(argv=None):
     """Terminates every Phantadex process on this machine."""
     parser = argparse.ArgumentParser(
-        prog="pdex stop",
+        prog=config.program_name("stop"),
         description="Phantadex Stop — end every running Phantadex process.",
     )
     parser.add_argument(
@@ -115,11 +104,11 @@ def stop_main(argv=None):
 def main(argv=None):
     """Dispatches the package CLI; no command defaults to Phantadex Dex."""
     arguments = list(sys.argv[1:] if argv is None else argv)
-    if arguments and arguments[0] in {"-h", "--help"}:
-        _help_parser().print_help()
+    if arguments and arguments[0] in {"-h", "--help", "help"}:
+        print(overview.render())
         return 0
     if arguments and arguments[0] == "--version":
-        _help_parser().parse_args(["--version"])
+        print(f"phantadex {__version__}")
         return 0
 
     if arguments and arguments[0] in COMMANDS:
@@ -127,7 +116,11 @@ def main(argv=None):
     elif not arguments or arguments[0].startswith("-"):
         command = "dex"
     else:
-        _help_parser().error(f"invalid command: {arguments[0]}")
+        program = config.program_name()
+        print(f"{program}: unknown command {arguments[0]!r}", file=sys.stderr)
+        print(f"Commands: {', '.join(COMMANDS)}", file=sys.stderr)
+        print(f"Run '{program} -h' for what each one does.", file=sys.stderr)
+        return 2
 
     handlers = {
         "dex": dex_main,

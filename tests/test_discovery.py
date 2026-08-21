@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from phantadex import discovery, element_schema, schema
+from phantadex import detection, discovery, element_schema, schema
 from phantadex.discovery import context, course_map, observation, probing, row_text, rules
 from phantadex.discovery.state import ObservationState
 from tests.fakes import FakeLocator, FakePage, capture_console
@@ -155,10 +155,12 @@ class CategoryFilterTests(unittest.TestCase):
         for page_type in probing.RELEVANT_CATEGORIES:
             self.assertIn(page_type, detectable, page_type)
 
-    def test_an_lti_lab_is_recognised_rather_than_left_unknown(self):
+    def test_an_external_tool_is_recognised_rather_than_left_unknown(self):
         # An UNKNOWN type falls back to scanning every category on the page.
         page = FakePage(url="https://www.coursera.org/learn/c/ungradedLti/abc/tool")
-        self.assertEqual(discovery.detect_page_type(page), "LAB")
+        self.assertEqual(discovery.detect_page_type(page), "UNGRADED_PLUGIN")
+        lab = FakePage(url="https://www.coursera.org/learn/c/ungradedLab/abc/lab")
+        self.assertEqual(discovery.detect_page_type(lab), "LAB")
 
     def test_every_named_category_exists_in_the_schema(self):
         # Regression: transcript elements sat in "content", which is only
@@ -592,12 +594,26 @@ class CoachPracticeTests(unittest.TestCase):
             "DIALOGUE",
         )
 
-    def test_an_ungraded_widget_is_still_its_own_type(self):
-        # Pulling dialogues out must not have moved the widgets with them.
+    def test_an_ungraded_plugin_is_named_for_what_it_is(self):
+        # Pulling dialogues out must not have moved the widgets with them, and
+        # a widget is not a lab: Coursera's own subtext calls it a plugin.
         self.assertEqual(
             discovery.classify_sidebar_row("ungraded plugin", "", "/learn/c/ungradedWidget/x/y"),
+            "UNGRADED_PLUGIN",
+        )
+
+    def test_an_ungraded_lab_stays_a_lab(self):
+        self.assertEqual(
+            discovery.classify_sidebar_row("ungraded lab", "", "/learn/c/ungradedLab/x/y"),
             "LAB",
         )
+
+    def test_both_still_reach_the_plugin_handler(self):
+        # The map distinguishes them; the runner has one handler for both.
+        for segment in ("ungradedWidget", "ungradedLab"):
+            self.assertEqual(
+                detection.type_from_url(f"/learn/c/{segment}/x/y"), detection.PLUGIN, segment
+            )
 
 
 if __name__ == "__main__":

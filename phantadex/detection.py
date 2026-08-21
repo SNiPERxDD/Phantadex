@@ -29,14 +29,18 @@ UNKNOWN = "UNKNOWN"
 # ``URL_SEGMENT_TYPES`` below collapses them. Keeping one segment table rather
 # than two stops the map and the runner disagreeing about what an item is.
 LAB = "LAB"
+# Coursera's own subtext for the widget and external-tool rows reads "Ungraded
+# Plugin"; an ungraded *lab* is a different row that says so. They were both
+# labelled LAB, which named neither of them correctly in the map.
+UNGRADED_PLUGIN = "UNGRADED_PLUGIN"
 PEER_REVIEW = "PEER_REVIEW"
 
 URL_SEGMENT_LABELS = {
     "lecture": VIDEO,
     "supplement": READING,
     "discussionPrompt": DISCUSSION,
-    "ungradedWidget": LAB,
-    "ungradedLti": LAB,
+    "ungradedWidget": UNGRADED_PLUGIN,
+    "ungradedLti": UNGRADED_PLUGIN,
     "ungradedLab": LAB,
     # Coursera's AI roleplay practice ("Practice: ...", subtext "Dialogue"). It
     # is ungraded like the widgets above, but it is driven rather than dwelled
@@ -52,7 +56,7 @@ URL_SEGMENT_LABELS = {
 }
 
 # Labels the map distinguishes but that share a single handler.
-_LABEL_TO_TYPE = {LAB: PLUGIN, PEER_REVIEW: ASSIGNMENT}
+_LABEL_TO_TYPE = {LAB: PLUGIN, UNGRADED_PLUGIN: PLUGIN, PEER_REVIEW: ASSIGNMENT}
 
 URL_SEGMENT_TYPES = {
     segment: _LABEL_TO_TYPE.get(label, label) for segment, label in URL_SEGMENT_LABELS.items()

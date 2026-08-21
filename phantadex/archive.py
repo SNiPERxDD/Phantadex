@@ -115,7 +115,7 @@ def run(settings, force=False):
 
 def main(argv=None):
     """Parses arguments and runs the archiver."""
-    parser = config.build_parser("Phantadex Archive — bulk course content archiver.")
+    parser = config.build_parser("Phantadex Archive — bulk course content archiver.", "archive")
     parser.add_argument("--force", action="store_true", help="Re-scrape already archived items")
     args = parser.parse_args(argv)
 

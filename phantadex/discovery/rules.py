@@ -9,7 +9,7 @@ import re
 from .. import detection
 
 # Core types we aim to verify, but we'll filter this based on actual course content
-CORE_TYPES = ["VIDEO", "READING", "QUIZ", "ASSIGNMENT", "LAB"]
+CORE_TYPES = ["VIDEO", "READING", "QUIZ", "ASSIGNMENT", "LAB", "UNGRADED_PLUGIN"]
 
 # Items to ignore when marking types as 'discovered'
 FILLER_KEYWORDS = [
@@ -89,7 +89,7 @@ SUBTEXT_TYPES = (
     ("reading", "READING"),
     ("assignment", "ASSIGNMENT"),
     ("quiz", "QUIZ"),
-    ("plugin", "LAB"),
+    ("plugin", "UNGRADED_PLUGIN"),
     ("lab", "LAB"),
     # Subtext of an AI roleplay practice item, served under the /coach/ segment.
     ("dialogue", "DIALOGUE"),

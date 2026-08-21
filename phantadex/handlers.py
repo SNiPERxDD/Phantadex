@@ -81,6 +81,10 @@ class BaseHandler:
 
     page_type = None
     content_type = None
+    # One line on what a run does with this kind of item, printed by ``pdex -h``.
+    # Held here rather than in the help text so a handler cannot be added and
+    # then go undocumented; ``tests/test_cli.py`` fails when one has no summary.
+    summary = ""
 
     def handle(self, page, ctx):
         raise NotImplementedError
@@ -116,6 +120,7 @@ class VideoHandler(BaseHandler):
 
     page_type = detection.VIDEO
     content_type = "Transcript"
+    summary = "Archives the transcript, then plays through to the completion target."
 
     def handle(self, page, ctx):
         ctx.announce("video", "video")
@@ -226,6 +231,7 @@ class ReadingHandler(BaseHandler):
 
     page_type = detection.READING
     content_type = "Reading"
+    summary = "Archives the body, dwells for the listed duration while scrolling, marks complete."
 
     def handle(self, page, ctx):
         ctx.announce("reading", "reading")
@@ -258,6 +264,7 @@ class QuizHandler(BaseHandler):
 
     page_type = detection.QUIZ
     content_type = None
+    summary = "Never answered. Graded ones are named and stepped past, or waited on."
 
     def handle(self, page, ctx):
         if detection.is_graded(page):
@@ -313,6 +320,7 @@ class PluginHandler(BaseHandler):
 
     page_type = detection.PLUGIN
     content_type = None
+    summary = "Ungraded plugin, external tool or lab. Ticked off if it offers a control."
 
     def handle(self, page, ctx):
         ctx.announce("plugin", "external resource / ungraded plugin")
@@ -332,6 +340,7 @@ class AssignmentHandler(PluginHandler):
     """Leaves graded assignments for the user and resumes after navigation."""
 
     page_type = detection.ASSIGNMENT
+    summary = "Peer and honors work is left to you. Nothing is drafted or submitted."
 
     def handle(self, page, ctx):
         ctx.announce("assignment", "peer or honors assignment")
@@ -351,6 +360,7 @@ class SurveyHandler(BaseHandler):
 
     page_type = detection.SURVEY
     content_type = None
+    summary = "Stepped past unanswered: it asks about you, not about the course."
 
     def handle(self, page, ctx):
         ctx.announce("survey", "survey -- not answered")
@@ -363,6 +373,7 @@ class DiscussionHandler(BaseHandler):
 
     page_type = detection.DISCUSSION
     content_type = "Discussion"
+    summary = "Archives the prompt. No reply is composed or posted."
 
     def handle(self, page, ctx):
         ctx.announce("discussion", "discussion prompt")
@@ -384,6 +395,7 @@ class DialogueHandler(BaseHandler):
 
     page_type = detection.DIALOGUE
     content_type = None
+    summary = "Opened, closed, and the closing confirmed, which is what completes it."
 
     def handle(self, page, ctx):
         ctx.announce("dialogue", "roleplay dialogue")

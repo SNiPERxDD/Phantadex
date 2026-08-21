@@ -2,6 +2,22 @@
 
 ## Current state
 
+- `pdex -h` renders `phantadex/overview.py`, not argparse. The page is derived
+  from two sources so it cannot drift: `cli.COMMANDS` *is*
+  `overview.COMMAND_SUMMARIES`'s key order, and the per-item lines come from each
+  handler's `summary` attribute. Adding a command or a handler without adding its
+  one-liner fails `tests/test_cli.py`. Do not hand-write item descriptions into
+  the page. The page must not print the expanded state directory: it names
+  `PHANTADEX_STATE_DIR` instead, and a test asserts the home path never appears.
+- `config.program_name(subcommand)` decides the `prog=` of every parser. Left to
+  argparse, each subcommand's usage line read as the bare entry point, so none of
+  them could be copied and run. A name that is not one of the two console entry
+  points is a compatibility wrapper, and its own filename is the honest usage.
+- The ungraded rows carry two map labels: `UNGRADED_PLUGIN` for
+  `/ungradedWidget/` and `/ungradedLti/`, `LAB` for `/ungradedLab/`. Both are
+  collapsed onto the single plugin handler by `detection._LABEL_TO_TYPE`, so this
+  is a naming distinction in the map only -- do not add a second handler for it.
+
 - Branch: `refactor/package-boundaries-and-schema`.
 - Package renamed from `rotomdex/` to `phantadex/`; imports use `phantadex`.
 - Package commands are `phantadex` and `pdex`; both dispatch Dex, Skip, Watch,

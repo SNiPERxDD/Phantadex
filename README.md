@@ -42,7 +42,10 @@ Product vocabulary:
         content pane, then marks complete.
     *   **Discussion:** Archives the prompt and advances. No reply is composed
         or submitted.
-    *   **Plugins / LTI:** Detected and stepped over.
+    *   **Ungraded Plugin / Lab:** Stepped over. The map names the two apart --
+        an embedded widget or external tool is an `UNGRADED_PLUGIN`, an ungraded
+        lab is a `LAB` -- because Coursera's own row subtext does; both reach the
+        same handler.
     *   **Dialogue:** Coursera's AI roleplay practice. Opened, then closed and
         the closing confirmed, which is what marks the item complete. The
         conversation itself is not held up or archived.
@@ -145,6 +148,16 @@ Sign in to the course in that window, then leave it open.
 2.  **Initialization:** Navigate to the target module entry point.
 3.  **Engagement:**
 
+    **What each command does:** `pdex -h` prints every command, what a run does
+    with each kind of course item, where files are written, and what is never
+    automated. It is built from the command table and the registered handlers,
+    so it cannot fall behind them.
+    ```bash
+    pdex -h
+    # The options for one command
+    pdex watch -h
+    ```
+
     **Option A: Phantadex Dex (Default)**
     Prints the active course tree without navigating or writing the ledger.
     `✓` means completed, `○` means incomplete, and `?` means the platform did
@@ -215,6 +228,7 @@ phantadex/
   config.yaml         # shipped selector defaults (immutable package data)
   __main__.py        # python -m phantadex
   cli.py             # dex/skip/watch/archive/discover/chrome/stop dispatch
+  overview.py        # the page 'pdex -h' prints, derived from cli + handlers
   chrome.py          # pdex chrome: starts the debug browser
   watch.py           # Watch argument parsing
   archive.py         # bulk Archive mode

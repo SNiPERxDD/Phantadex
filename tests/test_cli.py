@@ -10,7 +10,7 @@ from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from phantadex import config
+from phantadex import cli, config, course_manager, handlers, overview
 from tests.fakes import capture_console
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -254,13 +254,14 @@ class PackageCliTests(unittest.TestCase):
         launcher.assert_called_once_with(["--cdp-url", "http://localhost:9444"])
 
     def test_the_version_flag_reports_the_package_version(self):
+        # Returns rather than raising SystemExit: --version is handled before
+        # any parser is built, so there is no argparse exit to propagate.
         cli = self._load_cli()
         stream = io.StringIO()
         with redirect_stdout(stream):
-            with self.assertRaises(SystemExit) as raised:
-                cli.main(["--version"])
+            result = cli.main(["--version"])
 
-        self.assertEqual(raised.exception.code, 0)
+        self.assertEqual(result, 0)
         self.assertIn(cli.__version__, stream.getvalue())
 
     def test_discover_runs_the_selector_pass_against_the_given_endpoint(self):
@@ -306,7 +307,64 @@ class PackageCliTests(unittest.TestCase):
         with mock.patch.object(sys, "argv", ["phantadex"]), redirect_stdout(output):
             result = cli.main(["--help"])
         self.assertEqual(result, 0)
-        self.assertIn("usage: phantadex", output.getvalue())
+        self.assertIn("phantadex [command] [options]", output.getvalue())
+        self.assertNotIn("pdex ", output.getvalue())
+
+    def test_an_unknown_command_is_reported_without_a_traceback(self):
+        cli = self._load_cli()
+        errors = io.StringIO()
+        with redirect_stderr(errors):
+            result = cli.main(["bogus"])
+        self.assertEqual(result, 2)
+        self.assertIn("unknown command", errors.getvalue())
+        self.assertIn("dex", errors.getvalue())
+
+
+class HelpPageTests(unittest.TestCase):
+    """The page ``pdex -h`` prints, and the sources it is derived from.
+
+    The page is assembled from the command table and the registered handlers
+    rather than written out by hand, so what these tests guard is that the
+    derivation stays complete: a command that can be dispatched but is not
+    described, or a handler with nothing to say about itself, leaves the page
+    lying about what the tool does.
+    """
+
+    def test_every_dispatchable_command_is_described(self):
+        self.assertEqual(set(cli.COMMANDS), set(overview.COMMAND_SUMMARIES))
+
+    def test_every_command_appears_on_the_page(self):
+        page = overview.render()
+        for command in cli.COMMANDS:
+            self.assertIn(command, page, command)
+            self.assertIn(overview.COMMAND_SUMMARIES[command], page, command)
+
+    def test_every_handler_says_what_a_run_does_with_its_item(self):
+        for page_type, handler in handlers.HANDLERS.items():
+            self.assertTrue(handler.summary.strip(), page_type)
+
+    def test_every_handled_item_type_appears_on_the_page(self):
+        page = overview.render()
+        for page_type, handler in handlers.HANDLERS.items():
+            self.assertIn(page_type.lower(), page, page_type)
+            self.assertIn(handler.summary, page, page_type)
+
+    def test_the_page_names_the_ledger_limit_it_documents(self):
+        # Read from the module that enforces it, so changing the cap in one
+        # place cannot leave the help page quoting the old number.
+        self.assertIn(f"{course_manager.MAX_LEDGER_CONTENT_CHARS:,}", overview.render())
+
+    def test_the_page_keeps_no_machine_specific_paths(self):
+        # The state directory is per-machine; naming the variable is portable,
+        # printing the expanded path is not.
+        page = overview.render()
+        self.assertIn("PHANTADEX_STATE_DIR", page)
+        self.assertNotIn(str(Path.home()), page)
+
+    def test_usage_lines_follow_the_name_the_tool_was_called_by(self):
+        for name in ("pdex", "phantadex"):
+            with mock.patch.object(sys, "argv", [name]):
+                self.assertIn(f"{name} [command] [options]", overview.render())
 
 
 class VerbosityFlagTests(unittest.TestCase):

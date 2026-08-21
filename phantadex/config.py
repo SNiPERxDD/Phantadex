@@ -1,6 +1,8 @@
 """Runtime settings and CLI parsing shared by the entry points."""
 
 import argparse
+import os
+import sys
 from dataclasses import dataclass
 
 CDP_URL = "http://localhost:9222"
@@ -65,9 +67,27 @@ class Settings:
         )
 
 
-def build_parser(description):
+# The two console entry points the package installs. Anything else on
+# ``argv[0]`` is a compatibility script, whose own name is the honest usage line.
+ENTRY_POINTS = frozenset({"phantadex", "pdex"})
+
+
+def program_name(subcommand=""):
+    """Returns the invocation to print in a usage line.
+
+    A parser left to work this out itself reports ``argv[0]`` alone, so every
+    subcommand's help claimed to be ``pdex`` and none of the usage lines could
+    be copied and run as printed.
+    """
+    name = os.path.basename(sys.argv[0] or "")
+    if name not in ENTRY_POINTS:
+        return name or "pdex"
+    return f"{name} {subcommand}".strip()
+
+
+def build_parser(description, subcommand=""):
     """Builds the argument parser shared by both entry points."""
-    parser = argparse.ArgumentParser(description=description)
+    parser = argparse.ArgumentParser(description=description, prog=program_name(subcommand))
     parser.add_argument(
         "--cdp-url",
         default=CDP_URL,

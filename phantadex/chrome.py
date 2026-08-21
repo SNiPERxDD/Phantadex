@@ -75,7 +75,7 @@ def _debug_port(cdp_url):
 
 def main(argv=None):
     """Starts the debug browser, or reports that it is already running."""
-    parser = config.build_parser("Phantadex Chrome -- start the debug browser.")
+    parser = config.build_parser("Phantadex Chrome -- start the debug browser.", "chrome")
     settings = config.settings_from_args(parser.parse_args(argv))
     logs.setup(settings.log_level)
 
