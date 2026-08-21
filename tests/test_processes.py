@@ -87,19 +87,26 @@ class ProcessTableTests(unittest.TestCase):
 
 
 class TerminateTests(unittest.TestCase):
+    """Signal escalation, with liveness stubbed so the platform does not matter."""
+
     def setUp(self):
         self.signals = []
         self.alive = set()
+        self.sigkill = getattr(signal, "SIGKILL", signal.SIGTERM)
 
     def _kill(self, pid, number):
+        """Stands in for ``os.kill``: SIGTERM is obeyed, anything else recorded."""
         self.signals.append((pid, number))
         if pid not in self.alive:
             raise ProcessLookupError(pid)
-        if number in {signal.SIGTERM, getattr(signal, "SIGKILL", signal.SIGTERM)}:
+        if number == signal.SIGTERM:
             self.alive.discard(pid)
 
-    def _terminate(self, pids, **kwargs):
-        with mock.patch.object(processes.os, "kill", side_effect=self._kill):
+    def _terminate(self, pids, kill=None, **kwargs):
+        with (
+            mock.patch.object(processes.os, "kill", side_effect=kill or self._kill),
+            mock.patch.object(processes, "is_alive", side_effect=lambda pid: pid in self.alive),
+        ):
             return processes.terminate(pids, sleep=lambda _seconds: None, **kwargs)
 
     def test_a_cooperative_process_is_never_killed(self):
@@ -108,38 +115,40 @@ class TerminateTests(unittest.TestCase):
         stopped, survivors = self._terminate([10])
 
         self.assertEqual((stopped, survivors), ([10], []))
-        self.assertNotIn((10, getattr(signal, "SIGKILL", None)), self.signals)
+        self.assertNotIn((10, self.sigkill), self.signals)
 
     def test_a_process_that_ignores_the_request_is_killed(self):
         stubborn = 11
         self.alive = {stubborn}
-        sigkill = getattr(signal, "SIGKILL", signal.SIGTERM)
 
         def kill(pid, number):
             self.signals.append((pid, number))
-            if number == sigkill:
+            if number == self.sigkill:
                 self.alive.discard(pid)
-            elif pid not in self.alive:
-                raise ProcessLookupError(pid)
 
-        with mock.patch.object(processes.os, "kill", side_effect=kill):
-            stopped, survivors = processes.terminate(
-                [stubborn], grace_seconds=0.5, sleep=lambda _seconds: None
-            )
+        stopped, survivors = self._terminate([stubborn], kill=kill, grace_seconds=0.5)
 
         self.assertEqual((stopped, survivors), ([stubborn], []))
-        self.assertIn((stubborn, sigkill), self.signals)
+        self.assertIn((stubborn, self.sigkill), self.signals)
 
     def test_a_process_that_cannot_be_signalled_is_reported_as_a_survivor(self):
         # A refused signal proves the process is still there. Counting it as
         # stopped would have ``pdex stop`` claim an exit that never happened.
-        with mock.patch.object(processes.os, "kill", side_effect=PermissionError):
-            stopped, survivors = processes.terminate(
-                [12], grace_seconds=0.5, sleep=lambda _seconds: None
-            )
+        alive_forever = 12
+        self.alive = {alive_forever}
+
+        def kill(pid, number):
+            self.signals.append((pid, number))
+            raise PermissionError(pid)
+
+        stopped, survivors = self._terminate([alive_forever], kill=kill, grace_seconds=0.5)
 
         self.assertEqual(stopped, [])
-        self.assertEqual(survivors, [12])
+        self.assertEqual(survivors, [alive_forever])
+
+    def test_a_refused_signal_reads_as_still_running(self):
+        with mock.patch.object(processes.os, "kill", side_effect=PermissionError):
+            self.assertTrue(processes._signal(13, signal.SIGTERM))
 
     def test_this_process_is_alive(self):
         self.assertTrue(processes.is_alive(os.getpid()))
