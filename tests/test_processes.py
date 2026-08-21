@@ -115,7 +115,9 @@ class TerminateTests(unittest.TestCase):
         stopped, survivors = self._terminate([10])
 
         self.assertEqual((stopped, survivors), ([10], []))
-        self.assertNotIn((10, self.sigkill), self.signals)
+        # One signal, not two: escalation is counted rather than compared by
+        # number, because Windows has no SIGKILL to tell the second one apart.
+        self.assertEqual(self.signals, [(10, signal.SIGTERM)])
 
     def test_a_process_that_ignores_the_request_is_killed(self):
         stubborn = 11
@@ -129,7 +131,7 @@ class TerminateTests(unittest.TestCase):
         stopped, survivors = self._terminate([stubborn], kill=kill, grace_seconds=0.5)
 
         self.assertEqual((stopped, survivors), ([stubborn], []))
-        self.assertIn((stubborn, self.sigkill), self.signals)
+        self.assertEqual(self.signals, [(stubborn, signal.SIGTERM), (stubborn, self.sigkill)])
 
     def test_a_process_that_cannot_be_signalled_is_reported_as_a_survivor(self):
         # A refused signal proves the process is still there. Counting it as
