@@ -36,6 +36,17 @@ MODAL_RULES = (
         "demographics survey dismissed",
         None,
     ),
+    # Coursera's daily-goal congratulation. It renders over the item and covers
+    # the next-item control, so the click that should advance the run lands on
+    # the overlay instead. Confined to the dialog: the sidebar carries a
+    # "Today's goals" panel whose text would otherwise satisfy a page-wide rule.
+    (
+        "completed today's goals",
+        "h1, h2, h3",
+        ("Continue learning", "Close"),
+        "daily-goal dialog dismissed",
+        DIALOG_SELECTOR,
+    ),
     ("Reflect", "h1, h2, h3", ("Continue",), "video interrupt dismissed", IN_VIDEO_SCOPE),
     ("Poll", "h2, h3", ("Skip", "Continue"), "poll skipped", IN_VIDEO_SCOPE),
     # The in-video comprehension check. `Submit` stays disabled until the

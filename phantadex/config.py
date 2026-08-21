@@ -31,6 +31,10 @@ class Settings:
     # indefinitely, which stalled the whole traversal on a single item.
     pause_on_graded: bool = False
 
+    # Where a run starts: the first item the sidebar reports as unfinished,
+    # rather than wherever the tab happens to be sitting.
+    resume_at_incomplete: bool = True
+
     # Main-loop pacing.
     idle_poll_seconds: float = 2.0
     settle_seconds: float = 5.0
@@ -43,8 +47,10 @@ class Settings:
         seek = self.video_skip_range or "disabled"
         reading = "-".join(str(value) for value in self.reading_default_minutes)
         graded = "pause" if self.pause_on_graded else "skip"
+        start = "first-unfinished" if self.resume_at_incomplete else "here"
         return (
             f"threshold={self.video_completion_threshold}% seek={seek} reading={reading}m "
+            f"start={start} "
             f"graded={graded} log={self.log_level}"
         )
 
@@ -124,6 +130,14 @@ def add_automation_args(parser):
         ),
     )
     parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help=(
+            "Start on whichever item the tab is showing. Without this the run "
+            "jumps to the first item the sidebar does not mark complete."
+        ),
+    )
+    parser.add_argument(
         "--video-threshold",
         type=parse_video_threshold,
         default=100.0,
@@ -182,4 +196,5 @@ def settings_from_args(args):
         ),
         reading_default_minutes=getattr(args, "reading_minutes", DEFAULT_READING_MINUTES),
         pause_on_graded=getattr(args, "pause_on_graded", False),
+        resume_at_incomplete=not getattr(args, "no_resume", False),
     )

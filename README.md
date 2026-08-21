@@ -266,6 +266,9 @@ source. Both entry points share the connection flags:
 *   `--pause-on-graded` — stop on a graded quiz or peer assignment and wait for
     you to complete it. Without the flag the run names the item and moves to the
     next one; nothing is ever answered or submitted either way.
+*   `--no-resume` — start on whichever item the tab is showing. Without the flag
+    the run jumps once, on attach, to the first item the sidebar does not mark
+    complete, instead of stepping through finished work to reach it.
 
 `pdex skip` accepts `--video-skip-range` and uses the same random range parser
 as Watch. `pdex archive` adds `--force` to re-scrape already-archived items.

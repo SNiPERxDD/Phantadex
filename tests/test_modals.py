@@ -101,6 +101,34 @@ class DismissTests(unittest.TestCase):
         self.assertEqual(modals.dismiss_all(page), 1)
         self.assertEqual(skip.clicked, 1)
 
+    def test_dismisses_the_daily_goal_dialog(self):
+        # It renders over the item and covers "Go to next item", so an advance
+        # click lands on the overlay and the run cannot leave the page.
+        button = FakeLocator(count=1)
+        dialog = FakeLocator(
+            count=1,
+            children={
+                "h1, h2, h3|completed today's goals": FakeLocator(count=1),
+                "button:has-text('Continue learning')": button,
+            },
+        )
+        page = FakePage(locators={f"{modals.DIALOG_SELECTOR}|completed today's goals": dialog})
+        self.assertEqual(modals.dismiss_all(page), 1)
+        self.assertEqual(button.clicked, 1)
+
+    def test_the_sidebar_goals_panel_is_not_mistaken_for_the_dialog(self):
+        # The item sidebar carries a "Today's goals" panel. The rule is confined
+        # to the dialog so a page-wide text match cannot fire against it.
+        button = FakeLocator(count=1)
+        page = FakePage(
+            locators={
+                "h1, h2, h3|completed today's goals": FakeLocator(count=1),
+                "button:has-text('Continue learning')": button,
+            }
+        )
+        self.assertEqual(modals.dismiss_all(page), 0)
+        self.assertEqual(button.clicked, 0)
+
     def test_message_is_logged_only_after_a_button_is_clicked(self):
         # The announcement used to precede the click, so the log read as a
         # dismissal even when no button matched.

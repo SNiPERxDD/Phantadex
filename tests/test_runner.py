@@ -163,3 +163,101 @@ class UnhandledPageTypeTests(unittest.TestCase):
             self.watch._step_past_unhandled(self.page, detection.LAB)
             self.watch._step_past_unhandled(other, detection.LAB)
         advance.assert_not_called()
+
+
+class MappedManager:
+    """A manager exposing only the course map the resume scan reads."""
+
+    def __init__(self, course_map):
+        self.course_map = course_map
+
+
+COURSE = "https://www.coursera.org/learn/c"
+FIRST = f"{COURSE}/lecture/aaa/intro"
+SECOND = f"{COURSE}/supplement/bbb/notes"
+THIRD = f"{COURSE}/lecture/ccc/wrap"
+
+
+class ResumeAtFirstIncompleteTests(unittest.TestCase):
+    """The run starts where work is left, not where the tab happens to sit."""
+
+    def setUp(self):
+        self.watch = runner.Runner(config.Settings())
+        self.watch.ctx.manager = MappedManager(
+            {
+                "Week 1": [("Intro", "VIDEO", FIRST, "5 min"), ("Notes", "READING", SECOND, "")],
+                "Week 2": [("Wrap", "VIDEO", THIRD, "3 min")],
+            }
+        )
+        self.page = FakePage(url=FIRST)
+
+    def _resume(self, status):
+        with (
+            mock.patch.object(runner, "get_completion_status", return_value=status),
+            mock.patch.object(runner.time, "sleep"),
+        ):
+            return self.watch._resume_at_first_incomplete(self.page)
+
+    def _paths(self, *pairs):
+        return {runner.urls.normalize_path(url): state for url, state in pairs}
+
+    def test_jumps_over_completed_items_to_the_first_unfinished_one(self):
+        jumped = self._resume(self._paths((FIRST, True), (SECOND, True), (THIRD, False)))
+        self.assertTrue(jumped)
+        self.assertEqual(self.page.goto_calls, [THIRD])
+
+    def test_staying_put_when_the_open_item_is_already_the_first_unfinished(self):
+        jumped = self._resume(self._paths((FIRST, False), (SECOND, False)))
+        self.assertFalse(jumped)
+        self.assertEqual(self.page.goto_calls, [])
+
+    def test_a_fully_complete_course_is_not_navigated(self):
+        jumped = self._resume(self._paths((FIRST, True), (SECOND, True), (THIRD, True)))
+        self.assertFalse(jumped)
+        self.assertEqual(self.page.goto_calls, [])
+
+    def test_rows_whose_state_is_unreadable_are_not_treated_as_unfinished(self):
+        # An unknown row says nothing about its state. Targeting one would send
+        # a run that is near the end of a course back to its beginning.
+        jumped = self._resume({runner.urls.normalize_path(SECOND): True})
+        self.assertFalse(jumped)
+        self.assertEqual(self.page.goto_calls, [])
+
+    def test_no_resume_leaves_the_run_on_the_open_item(self):
+        self.watch.settings = config.Settings(resume_at_incomplete=False)
+        jumped = self._resume(self._paths((FIRST, True), (THIRD, False)))
+        self.assertFalse(jumped)
+        self.assertEqual(self.page.goto_calls, [])
+
+    def test_a_failed_scan_is_not_fatal(self):
+        with mock.patch.object(
+            runner, "get_completion_status", side_effect=RuntimeError("sidebar gone")
+        ):
+            self.assertFalse(self.watch._resume_at_first_incomplete(self.page))
+        self.assertEqual(self.page.goto_calls, [])
+
+
+class TickMutesBeforeAnyPromptTests(unittest.TestCase):
+    """Muting has to happen on the tick, not inside a handler.
+
+    An item the sidebar already marks complete never reaches a handler: the run
+    offers to skip it first, and its narration used to play aloud for the whole
+    length of that prompt.
+    """
+
+    def test_a_completed_item_is_muted_before_the_skip_prompt(self):
+        watch = runner.Runner(config.Settings())
+        page = FakePage(url=f"{COURSE}/supplement/bbb/notes")
+        with (
+            mock.patch.object(runner.Runner, "_detect_stuck", return_value=False),
+            mock.patch.object(runner.Runner, "_sync_course_map", return_value=False),
+            mock.patch.object(runner.Runner, "_log_context"),
+            mock.patch.object(runner.page_ops, "is_locked_item", return_value=False),
+            mock.patch.object(runner.modals, "dismiss_all"),
+            mock.patch.object(runner.detection, "classify", return_value=detection.READING),
+            mock.patch.object(runner.interaction, "silence_media") as silence,
+            mock.patch.object(runner.Runner, "_skip_completed", return_value="SKIPPED") as skip,
+        ):
+            watch._tick(page)
+        silence.assert_called_once_with(page)
+        skip.assert_called_once()

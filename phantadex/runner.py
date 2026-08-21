@@ -10,6 +10,7 @@ import time
 from . import (
     detection,
     handlers,
+    interaction,
     logs,
     modals,
     navigation,
@@ -19,7 +20,7 @@ from . import (
     video,
 )
 from .course_manager import CourseManager
-from .discovery import get_detailed_course_map, get_robust_course_name
+from .discovery import get_completion_status, get_detailed_course_map, get_robust_course_name
 from .session import BrowserSession
 
 log = logs.get_logger("runner")
@@ -50,6 +51,8 @@ class Runner:
     HANDLER_FAILURE_LIMIT = 3
     # Passes an unclassified page is given before the run steps past it.
     UNHANDLED_WAIT_LIMIT = 3
+    # Settling time after the one-off jump to the first unfinished item.
+    RESUME_SETTLE_SECONDS = 3
 
     def run(self):
         """Connects and loops until the course ends or the user interrupts."""
@@ -82,7 +85,13 @@ class Runner:
         if self._detect_stuck(page):
             return handlers.CONTINUE
 
-        self._sync_course_map(page)
+        # First thing on every tick, ahead of the map scan and the completion
+        # prompt alike: neither of those reaches a handler, and a reading whose
+        # narration autoplays used to be audible for the whole of both.
+        interaction.silence_media(page)
+
+        if self._sync_course_map(page) and self._resume_at_first_incomplete(page):
+            return handlers.CONTINUE
         self._log_context(page)
 
         if page_ops.is_locked_item(page):
@@ -225,16 +234,18 @@ class Runner:
         Identity is the URL slug, not the rendered course name: two courses that
         resolve to the same display text would otherwise keep the first one's
         manager, archiving the second course into the first one's ledger.
+
+        Returns True when a new map was loaded on this call.
         """
         try:
             course = get_robust_course_name(page)
             course_key = urls.course_slug(page.url) or course
         except Exception as exc:
             log.debug("Course name lookup failed: %s", exc)
-            return
+            return False
 
         if not course or len(course) <= 3 or course_key == self.last_course_key:
-            return
+            return False
 
         logs.banner(course)
         try:
@@ -242,15 +253,66 @@ class Runner:
                 course_map = get_detailed_course_map(page)
         except Exception as exc:
             log.warning("Course map generation failed: %s", exc)
-            return
+            return False
 
         if not course_map:
             logs.warn("Course map came back empty; navigation fallbacks disabled.")
-            return
+            return False
 
         self.ctx.manager = CourseManager(course_map, course, root_dir=self.settings.transcript_dir)
         self.last_course_key = course_key
         logs.step(f"map loaded · ledger {self.ctx.manager.xml_path}")
+        return True
+
+    def _resume_at_first_incomplete(self, page):
+        """Jumps straight to the first item the sidebar does not mark complete.
+
+        Walking there item by item meant a skip prompt on every finished item in
+        between, so a course resumed near its end spent minutes stepping through
+        work already done. Only rows the sidebar explicitly reports as unfinished
+        are targeted: an unreadable row says nothing about its state, and
+        treating it as a target would send the run backwards.
+
+        Returns True when the page was navigated.
+        """
+        if not self.settings.resume_at_incomplete or self.ctx.manager is None:
+            return False
+
+        try:
+            status = get_completion_status(page)
+        except Exception as exc:
+            log.debug("Completion scan failed: %s", exc)
+            return False
+        if not status:
+            return False
+
+        target = self._first_incomplete_url(status)
+        if not target:
+            logs.step("no unfinished item in the sidebar; starting from here")
+            return False
+        if urls.same_item(page.url, target):
+            logs.step("already at the first unfinished item")
+            return False
+
+        logs.nav(f"resuming at {urls.normalize_path(target)}")
+        try:
+            page.goto(urls.absolute_url(target))
+        except Exception as exc:
+            log.warning("Resume navigation to %s failed: %s", target, exc)
+            return False
+        time.sleep(self.RESUME_SETTLE_SECONDS)
+        self.last_context_line = ""
+        self.ctx.reset_announcements()
+        return True
+
+    def _first_incomplete_url(self, status):
+        """Returns the first mapped item the sidebar reports as unfinished."""
+        for lessons in self.ctx.manager.course_map.values():
+            for lesson in lessons:
+                href = lesson[2]
+                if status.get(urls.normalize_path(href)) is False:
+                    return href
+        return None
 
     def _log_context(self, page):
         """Prints the course/module context line when the item changes."""
