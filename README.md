@@ -71,8 +71,8 @@ pipx install phantadex        # or: python -m pip install --user phantadex
 
 Windows (PowerShell):
 ```powershell
-git clone https://github.com/SNiPERxDD/course-auto.git
-cd course-auto
+git clone https://github.com/SNiPERxDD/phantadex.git
+cd phantadex
 python -m venv .venv
 
 # Allows the activation script to run in this window only; a new terminal
@@ -85,8 +85,8 @@ pip install -e .
 
 macOS / Linux:
 ```bash
-git clone https://github.com/SNiPERxDD/course-auto.git
-cd course-auto
+git clone https://github.com/SNiPERxDD/phantadex.git
+cd phantadex
 python3 -m venv venv
 source venv/bin/activate
 pip install -e .
