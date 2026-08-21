@@ -31,6 +31,11 @@ ENTRY_POINT_NAMES = frozenset(
 )
 MODULE_PACKAGE = "phantadex"
 
+# The escalation signal. SIGKILL is unavailable on Windows, where `os.kill`
+# with any signal other than a console event already calls TerminateProcess:
+# there is no harder step to escalate to there.
+KILL_SIGNAL = getattr(signal, "SIGKILL", signal.SIGTERM)
+
 # How long a process is given to exit on its own before it is killed outright.
 TERM_GRACE_SECONDS = 6.0
 POLL_SECONDS = 0.25
@@ -187,10 +192,7 @@ def terminate(pids, grace_seconds=TERM_GRACE_SECONDS, sleep=time.sleep):
         remaining = [pid for pid in remaining if is_alive(pid)]
 
     for pid in remaining:
-        # SIGKILL is unavailable on Windows, where `os.kill` with any signal
-        # other than a console event already calls TerminateProcess: there is
-        # no harder step to escalate to.
-        _signal(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+        _signal(pid, KILL_SIGNAL)
     sleep(POLL_SECONDS)
 
     survivors = [pid for pid in pids if is_alive(pid)]

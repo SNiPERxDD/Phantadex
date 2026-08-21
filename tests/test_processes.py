@@ -92,7 +92,10 @@ class TerminateTests(unittest.TestCase):
     def setUp(self):
         self.signals = []
         self.alive = set()
-        self.sigkill = getattr(signal, "SIGKILL", signal.SIGTERM)
+        # Stands in for the escalation signal, which is SIGTERM again on
+        # Windows: a distinct number is what makes the two steps tellable
+        # apart in the assertions below on either platform.
+        self.sigkill = signal.SIGINT
 
     def _kill(self, pid, number):
         """Stands in for ``os.kill``: SIGTERM is obeyed, anything else recorded."""
@@ -104,6 +107,7 @@ class TerminateTests(unittest.TestCase):
 
     def _terminate(self, pids, kill=None, **kwargs):
         with (
+            mock.patch.object(processes, "KILL_SIGNAL", self.sigkill),
             mock.patch.object(processes.os, "kill", side_effect=kill or self._kill),
             mock.patch.object(processes, "is_alive", side_effect=lambda pid: pid in self.alive),
         ):
