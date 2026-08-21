@@ -159,12 +159,49 @@ class SaveContentTests(CourseManagerTestCase):
         with open(self.manager.xml_path) as handle:
             self.assertIn("transcript body", handle.read())
 
-    def test_unmapped_url_still_writes_file(self):
+    def test_unmapped_url_is_adopted_into_the_ledger(self):
         filename, ledger_ok = self.manager.save_content(
             "/learn/demo/lecture/zzz/other", "orphan body", "Transcript"
         )
-        self.assertFalse(ledger_ok)
+        self.assertTrue(ledger_ok)
         self.assertTrue(os.path.exists(os.path.join(self.manager.root_dir, filename)))
+
+        root = ET.parse(self.manager.xml_path).getroot()
+        adopted = root.find(".//item[@url='/learn/demo/lecture/zzz/other']")
+        self.assertIsNotNone(adopted)
+        self.assertEqual(adopted.get("type"), "VIDEO")
+        self.assertEqual(adopted.findtext("content"), "orphan body")
+        module = root.find("module[@title='Unknown_Module']")
+        self.assertIsNotNone(module)
+
+    def test_an_item_the_map_calls_unarchivable_is_adopted_where_it_belongs(self):
+        # The row scanned as FILLER, so the ledger never listed it; the live page
+        # turned out to be a reading and was archived anyway.
+        course_map = {
+            "Module 1": [("Course Survey", "FILLER", "/learn/demo/supplement/eee/survey", 2)]
+        }
+        manager = CourseManager(course_map, "Demo", root_dir=self._tmp.name)
+        _filename, ledger_ok = manager.save_content(
+            "/learn/demo/supplement/eee/survey", "survey body", "Reading"
+        )
+        self.assertTrue(ledger_ok)
+
+        root = ET.parse(manager.xml_path).getroot()
+        adopted = root.find(".//item[@url='/learn/demo/supplement/eee/survey']")
+        self.assertEqual(adopted.get("title"), "Course Survey")
+        self.assertEqual(adopted.get("type"), "READING")
+        self.assertEqual(
+            root.find("module[@title='Module 1']").findall("item"),
+            [adopted],
+        )
+
+    def test_adopting_an_item_does_not_duplicate_it_on_the_next_run(self):
+        self.manager.save_content("/learn/demo/lecture/zzz/other", "orphan body", "Transcript")
+        reopened = CourseManager(COURSE_MAP, "Demo: Course/Name", root_dir=self._tmp.name)
+        root = ET.parse(reopened.xml_path).getroot()
+        matches = root.findall(".//item[@url='/learn/demo/lecture/zzz/other']")
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0].findtext("content"), "orphan body")
 
     def test_two_unmapped_items_do_not_overwrite_each_other(self):
         first, _ = self.manager.save_content(

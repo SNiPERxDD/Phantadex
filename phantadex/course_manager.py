@@ -15,7 +15,11 @@ log = logs.get_logger("course_manager")
 ARCHIVABLE_TYPES = ("VIDEO", "READING", "DISCUSSION")
 # The content-type suffixes ``save_content`` writes, one per archivable type.
 ARCHIVE_CONTENT_TYPES = ("Transcript", "Reading", "Discussion")
+# The item type a saved file implies, used when an item reaches the ledger by
+# being archived rather than by appearing in the map as an archivable row.
+ITEM_TYPES_BY_CONTENT_TYPE = dict(zip(ARCHIVE_CONTENT_TYPES, ARCHIVABLE_TYPES))
 UNRESOLVED_TITLE = "Unknown_Item"
+UNRESOLVED_MODULE = "Unknown_Module"
 LOCK_TIMEOUT_SECONDS = 30
 LOCK_POLL_SECONDS = 0.05
 LEGACY_TRANSCRIPT_DIR = "coursera_transcripts"
@@ -202,7 +206,7 @@ class CourseManager:
                     )
                 lesson_index += 1
             module_index += 1
-        return (0, 0, UNRESOLVED_TITLE, "Unknown_Module")
+        return (0, 0, UNRESOLVED_TITLE, UNRESOLVED_MODULE)
 
     def filename_for(self, current_url, content_type):
         """Builds the archive filename for an item.
@@ -233,9 +237,11 @@ class CourseManager:
             written_path = storage.save_versioned(
                 os.path.join(self.root_dir, filename), content_text
             )
-            return os.path.basename(written_path), self._update_ledger(current_url, content_text)
+            return os.path.basename(written_path), self._update_ledger(
+                current_url, content_text, content_type
+            )
 
-    def _update_ledger(self, current_url, content_text):
+    def _update_ledger(self, current_url, content_text, content_type):
         """Stores content against the matching ledger item. Returns success."""
         tree = self._read_tree()
         if tree is None:
@@ -259,8 +265,57 @@ class CourseManager:
                 log.error("Could not write ledger %s: %s", self.xml_path, exc)
                 return False
 
-        log.debug("No ledger entry matches %s", current_url)
-        return False
+        return self._adopt_item(tree, current_url, content_text, content_type)
+
+    def _adopt_item(self, tree, current_url, content_text, content_type):
+        """Adds a ledger entry for an archived item the ledger did not list.
+
+        The sidebar row's type and the live page's own classification can
+        disagree: a supplement whose title reads as a survey is mapped
+        ``FILLER`` and so never reaches the ledger, yet once opened it is a
+        reading and is archived. Discussion prompts behave the same way when a
+        row renders before its subtext does. The file was written either way,
+        and the ledger -- which exists to account for what was archived --
+        did not mention it. The item is filed where the map places it, or under
+        a catch-all module when the map does not know the URL at all.
+        """
+        entry = self._map_entry(current_url)
+        if entry is None:
+            module_name = UNRESOLVED_MODULE
+            title = _title_from_url(current_url)
+            item_type = ITEM_TYPES_BY_CONTENT_TYPE.get(content_type, "UNKNOWN")
+        else:
+            module_name, title, mapped_type = entry
+            item_type = ITEM_TYPES_BY_CONTENT_TYPE.get(content_type, mapped_type)
+
+        root = tree.getroot()
+        module_node = next(
+            (node for node in root.findall("module") if node.get("title") == module_name),
+            None,
+        )
+        if module_node is None:
+            module_node = ET.SubElement(root, "module", title=module_name)
+        item_node = ET.SubElement(module_node, "item")
+        item_node.set("title", title)
+        item_node.set("type", item_type)
+        item_node.set("url", urls.normalize_path(current_url))
+        ET.SubElement(item_node, "content").text = content_text
+
+        try:
+            self._write_tree(tree)
+        except OSError as exc:
+            log.error("Could not write ledger %s: %s", self.xml_path, exc)
+            return False
+        log.info("Adopted %s into the ledger under %s", current_url, module_name)
+        return True
+
+    def _map_entry(self, current_url):
+        """Returns ``(module_name, title, item_type)`` for a mapped URL, else ``None``."""
+        for module_name, lessons in self.course_map.items():
+            for title, item_type, map_url, _duration in lessons:
+                if urls.same_item(map_url, current_url):
+                    return module_name, title, item_type
+        return None
 
     def mark_failed(self, current_url, reason):
         """Records that automation gave up on an item. Returns success.
@@ -367,6 +422,13 @@ class CourseManager:
                 return None
         log.debug("Current URL %s not found in course map", current_url)
         return None
+
+
+def _title_from_url(current_url):
+    """Derives a readable title from a Coursera item slug."""
+    slug = urls.normalize_path(current_url).rsplit("/", 1)[-1]
+    title = slug.replace("-", " ").strip()
+    return title.title() if title else UNRESOLVED_TITLE
 
 
 def _migrate_legacy_course_directory(root_dir, safe_course_name):

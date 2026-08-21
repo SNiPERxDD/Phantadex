@@ -227,7 +227,7 @@ phantadex/
     state.py         # ObservationState: what one discovery run accumulates
   element_schema.py  # ELEMENTS_SCHEMA: the built-in selector candidates
   handlers.py        # one handler class per content type
-  interaction.py     # mouse / scroll / reading-session pacing
+  interaction.py     # mouse / scroll / reading-session pacing, media mute guard
   jitter.py          # human-shaped delays for the observable timing sites
   logs.py            # tree-style formatter over the stdlib logging module
   modals.py          # data-driven modal dismissal rules
@@ -382,6 +382,16 @@ python run_tests.py --live   # additionally probe a running Chrome session
     policy and never treated as a scrollable reading. Scrolling is limited to an
     overflowing ancestor of the reading body; short readings dwell without wheel
     input, stop at the bottom, and exit immediately if the active item changes.
+*   **Audio:** Media is muted by a guard installed ahead of the page's own
+    scripts, so a player is silent from `loadstart` rather than from the next
+    poll, and an attempt to raise the volume afterwards is undone. The guard is
+    limited to the platform host because it is installed on the browser profile
+    the user is already using.
+*   **Ledger Completeness:** An item that is archived but absent from the ledger
+    is added to it, under the module the course map gives it or a catch-all
+    module when the URL is unmapped. Row types and live page classification can
+    disagree, and an archived file with no ledger entry is invisible to a later
+    run.
 *   **Archive Concurrency:** Course writes use a cross-process lock and atomic
     XML replacement, so Watch and Archive can share a ledger without partial or
     lost writes.

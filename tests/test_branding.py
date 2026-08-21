@@ -7,7 +7,7 @@ from contextlib import ExitStack
 from pathlib import Path
 from unittest import mock
 
-from phantadex import archive, config, handlers, runner, session
+from phantadex import archive, config, handlers, interaction, runner, session
 from tests.fakes import FakePage
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -44,11 +44,22 @@ class FakeCourseManager:
         return set()
 
 
+class FakeContext:
+    """Browser context stub: enough surface for the media guard install."""
+
+    def __init__(self, pages=()):
+        self.pages = list(pages)
+        self.init_scripts = []
+
+    def add_init_script(self, script=None, path=None):
+        self.init_scripts.append(script or path)
+
+
 class FakePlaywright:
     """In-process CDP boundary fake for the Link label check."""
 
     def __init__(self):
-        browser = type("Browser", (), {"contexts": [object()]})()
+        browser = type("Browser", (), {"contexts": [FakeContext()]})()
         self.chromium = type(
             "Chromium",
             (),
@@ -79,7 +90,7 @@ class BrowserSessionCleanupTests(unittest.TestCase):
             "Browser",
             (),
             {
-                "contexts": [object()],
+                "contexts": [FakeContext()],
                 "close": lambda _self, **_kwargs: events.append("browser.close"),
             },
         )()
@@ -94,6 +105,31 @@ class BrowserSessionCleanupTests(unittest.TestCase):
                 pass
 
         self.assertEqual(events, ["browser.close", "playwright.stop"])
+
+
+class MediaGuardTests(unittest.TestCase):
+    def _attach(self, context):
+        browser = type("Browser", (), {"contexts": [context], "close": lambda _s, **_k: None})()
+        playwright = mock.Mock()
+        playwright.chromium.connect_over_cdp.return_value = browser
+        with mock.patch.object(
+            session, "sync_playwright", return_value=mock.Mock(start=lambda: playwright)
+        ):
+            with session.BrowserSession("http://localhost:9222"):
+                pass
+
+    def test_attaching_installs_the_guard_for_later_documents(self):
+        context = FakeContext()
+        self._attach(context)
+        self.assertEqual(len(context.init_scripts), 1)
+        self.assertIn("__phantadexMediaGuard", context.init_scripts[0])
+
+    def test_only_platform_tabs_already_open_are_armed(self):
+        course = mock.Mock(url="https://www.coursera.org/learn/demo/lecture/aaa/welcome")
+        elsewhere = mock.Mock(url="https://example.com/watch")
+        self._attach(FakeContext(pages=[course, elsewhere]))
+        course.evaluate.assert_called_once_with(interaction._MEDIA_GUARD_JS)
+        elsewhere.evaluate.assert_not_called()
 
 
 class EntryPointTests(unittest.TestCase):

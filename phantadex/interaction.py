@@ -238,6 +238,70 @@ _SILENCE_JS = """
 """
 
 
+# Installed once per document, before the page's own scripts run. ``silence_media``
+# only reaches an element on the tick after it appears, which is a moment or two
+# of audible autoplay; this mutes at 'loadstart', before a frame is decoded, and
+# again on any attempt to raise the volume afterwards.
+#
+# Scoped to the platform host: the guard is installed on the browser context,
+# which is the user's own default profile, and muting the tabs they open beside
+# a run would be a side effect of automating something else entirely.
+_MEDIA_GUARD_JS = (
+    """
+(() => {
+    if (window.__phantadexMediaGuard) return false;
+    if (!location.hostname.endsWith('"""
+    + urls.PLATFORM_HOST
+    + """')) return false;
+    const silence = (element) => {
+        if (!(element instanceof HTMLMediaElement)) return;
+        if (element.muted && element.volume === 0) return;
+        element.muted = true;
+        element.volume = 0;
+    };
+    const events = ['loadstart', 'loadedmetadata', 'canplay', 'play', 'playing',
+                    'volumechange'];
+    for (const type of events) {
+        document.addEventListener(type, (event) => silence(event.target), true);
+    }
+    // Programmatic playback can start without any of those events having been
+    // seen yet, so the entry point itself is covered too.
+    const play = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function () {
+        silence(this);
+        return play.apply(this, arguments);
+    };
+    document.querySelectorAll('audio, video').forEach(silence);
+    window.__phantadexMediaGuard = true;
+    return true;
+})();
+"""
+)
+
+
+def install_media_guard(context):
+    """Arms the mute guard in every document the context opens from now on."""
+    try:
+        context.add_init_script(script=_MEDIA_GUARD_JS)
+        return True
+    except Exception as exc:
+        log.debug("Could not install the media guard: %s", exc)
+        return False
+
+
+def arm_media_guard(page):
+    """Installs the mute guard into a document that is already open.
+
+    Returns True when this call armed it. A document that already carries the
+    guard, and any page off the platform, report False.
+    """
+    try:
+        return bool(page.evaluate(_MEDIA_GUARD_JS))
+    except Exception as exc:
+        log.debug("Could not arm the media guard: %s", exc)
+        return False
+
+
 def silence_media(page):
     """Mutes every audio and video element on the page.
 

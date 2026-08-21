@@ -23,6 +23,17 @@
   `--video-threshold`, which defaults to `98-100`. `Settings` normalises a bare
   number into a range of zero width, so callers passing a scalar still work.
   `pdex skip` still always seeks.
+- Media is silenced by a guard installed on the browser context
+  (`interaction.install_media_guard`, armed on already-open tabs by
+  `BrowserSession`), which runs before the page's own scripts and mutes at
+  `loadstart`. `silence_media` is kept as the per-tick sweep. The guard checks
+  the platform host first: the context is the user's own Chrome profile, and
+  muting their unrelated tabs would be a side effect of automating this one.
+- An archived item missing from the ledger is adopted into it
+  (`CourseManager._adopt_item`) rather than logged as `ledger unmatched`. Map
+  row types and live page classification disagree often enough -- a
+  survey-titled supplement maps to `FILLER` but reads as a `READING` -- that a
+  file could be written with nothing recording it.
 - `python -m phantadex` provides the same interface. The root Watch and Archive
   scripts remain compatibility wrappers.
 - Runtime output names Phantadex Watch, Archive, Dex, and Link.

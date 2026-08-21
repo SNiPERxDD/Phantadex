@@ -3,7 +3,7 @@
 import unittest
 from unittest import mock
 
-from phantadex import interaction
+from phantadex import interaction, urls
 from tests.fakes import FakeLocator, FakePage
 
 CONTENT_SELECTOR = "div.rc-CML, main, div[role='main']"
@@ -251,3 +251,30 @@ class SilenceMediaTests(unittest.TestCase):
         self.assertIn("audio", interaction._SILENCE_JS)
         self.assertIn("video", interaction._SILENCE_JS)
         self.assertIn("volume = 0", interaction._SILENCE_JS)
+
+
+class MediaGuardTests(unittest.TestCase):
+    def test_the_guard_only_applies_to_the_platform(self):
+        self.assertIn("location.hostname.endsWith", interaction._MEDIA_GUARD_JS)
+        self.assertIn(urls.PLATFORM_HOST, interaction._MEDIA_GUARD_JS)
+
+    def test_the_guard_mutes_before_playback_rather_than_after(self):
+        # 'loadstart' is the earliest media event; catching only 'playing'
+        # would mean muting a player that is already audible.
+        self.assertIn("loadstart", interaction._MEDIA_GUARD_JS)
+        self.assertIn("HTMLMediaElement.prototype.play", interaction._MEDIA_GUARD_JS)
+
+    def test_arming_reports_whether_this_call_installed_it(self):
+        page = mock.Mock()
+        page.evaluate.return_value = True
+        self.assertTrue(interaction.arm_media_guard(page))
+        page.evaluate.return_value = False
+        self.assertFalse(interaction.arm_media_guard(page))
+
+    def test_a_failed_install_is_not_fatal(self):
+        context = mock.Mock()
+        context.add_init_script.side_effect = RuntimeError("detached")
+        self.assertFalse(interaction.install_media_guard(context))
+        page = mock.Mock()
+        page.evaluate.side_effect = RuntimeError("navigating")
+        self.assertFalse(interaction.arm_media_guard(page))

@@ -4,7 +4,7 @@ import os
 
 from playwright.sync_api import sync_playwright
 
-from . import logs, urls
+from . import interaction, logs, urls
 
 log = logs.get_logger("session")
 
@@ -49,7 +49,18 @@ class BrowserSession:
             self._playwright = None
             raise RuntimeError("Connected to Chrome but it has no browser context open.")
         self.context = self.browser.contexts[0]
+        self._guard_media()
         return self
+
+    def _guard_media(self):
+        """Mutes platform media pre-emptively, in this tab and in later ones."""
+        interaction.install_media_guard(self.context)
+        for page in self.context.pages:
+            try:
+                if urls.PLATFORM_HOST in page.url:
+                    interaction.arm_media_guard(page)
+            except Exception as exc:
+                log.debug("Could not arm the media guard on a tab: %s", exc)
 
     def __exit__(self, exc_type, exc, traceback):
         self._disconnect_browser()
