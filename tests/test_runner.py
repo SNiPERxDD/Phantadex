@@ -1,0 +1,303 @@
+"""Tests for the traversal loop's own decisions (not the per-type handlers)."""
+
+import unittest
+from unittest import mock
+
+from phantadex import config, detection, runner
+from tests.fakes import FakePage, capture_console
+
+
+class FakeManager:
+    """A course manager that records what was saved and what it already holds."""
+
+    def __init__(self, archived=False):
+        self._archived = archived
+        self.saved = []
+
+    def is_archived(self, _url):
+        return self._archived
+
+    def save_content(self, url, text, content_type):
+        self.saved.append((url, text, content_type))
+        return "Item_Reading.txt", True
+
+
+class ArchiveBeforeSkipTests(unittest.TestCase):
+    """A completed reading is still worth archiving before moving past it."""
+
+    def setUp(self):
+        self.runner = runner.Runner(config.Settings())
+        self.page = FakePage(url="https://www.coursera.org/learn/c/supplement/abc/read")
+
+    def _skip(self, manager, text="Body text."):
+        self.runner.ctx.manager = manager
+        with mock.patch.object(runner.page_ops, "extract_reading", return_value=text):
+            self.runner._archive_before_skip(self.page, detection.READING)
+
+    def test_unarchived_reading_is_saved(self):
+        manager = FakeManager(archived=False)
+        self._skip(manager)
+        self.assertEqual(len(manager.saved), 1)
+        self.assertEqual(manager.saved[0][1], "Body text.")
+        self.assertEqual(manager.saved[0][2], "Reading")
+
+    def test_reading_already_in_the_ledger_is_not_saved_twice(self):
+        manager = FakeManager(archived=True)
+        self._skip(manager)
+        self.assertEqual(manager.saved, [])
+
+    def test_non_reading_types_are_left_alone(self):
+        manager = FakeManager(archived=False)
+        self.runner.ctx.manager = manager
+        with mock.patch.object(runner.page_ops, "extract_reading", return_value="x"):
+            self.runner._archive_before_skip(self.page, detection.PLUGIN)
+        self.assertEqual(manager.saved, [])
+
+    def test_persistent_handler_failure_advances_after_three_attempts(self):
+        current = FakePage(url="https://www.coursera.org/learn/c/lecture/abc/item")
+        watch = runner.Runner(config.Settings())
+        broken = mock.Mock()
+        broken.handle.side_effect = RuntimeError("detached DOM")
+        with (
+            mock.patch.object(watch, "_detect_stuck", return_value=False),
+            mock.patch.object(watch, "_sync_course_map"),
+            mock.patch.object(watch, "_log_context"),
+            mock.patch.object(runner.modals, "dismiss_all"),
+            mock.patch.object(runner.detection, "classify", return_value=detection.VIDEO),
+            mock.patch.object(runner.handlers, "for_page_type", return_value=broken),
+            mock.patch.object(watch, "_skip_completed", return_value="PROCEED"),
+            mock.patch.object(runner.navigation, "advance", return_value="NAVIGATED") as advance,
+            mock.patch.object(runner.time, "sleep"),
+        ):
+            for _ in range(3):
+                result = watch._tick(current)
+        self.assertEqual(result, runner.handlers.CONTINUE)
+        advance.assert_called_once()
+
+    def test_locked_item_retreats_before_classification(self):
+        watch = runner.Runner(config.Settings())
+        watch.ctx.manager = FakeManager()
+        page = FakePage(url="https://www.coursera.org/learn/c/supplement/abc/locked")
+        with (
+            mock.patch.object(watch, "_detect_stuck", return_value=False),
+            mock.patch.object(watch, "_sync_course_map"),
+            mock.patch.object(watch, "_log_context"),
+            mock.patch.object(runner.page_ops, "is_locked_item", return_value=True),
+            mock.patch.object(runner.navigation, "retreat", return_value="NAVIGATED") as retreat,
+            mock.patch.object(runner.detection, "classify") as classify,
+        ):
+            result = watch._tick(page)
+
+        self.assertEqual(result, runner.handlers.CONTINUE)
+        retreat.assert_called_once_with(page, watch.ctx.manager, start_url=page.url)
+        classify.assert_not_called()
+
+    def test_empty_body_is_not_written(self):
+        manager = FakeManager(archived=False)
+        self._skip(manager, text="")
+        self.assertEqual(manager.saved, [])
+
+    def test_extraction_failure_does_not_block_the_skip(self):
+        manager = FakeManager(archived=False)
+        self.runner.ctx.manager = manager
+        with mock.patch.object(
+            runner.page_ops, "extract_reading", side_effect=RuntimeError("detached")
+        ):
+            self.runner._archive_before_skip(self.page, detection.READING)
+        self.assertEqual(manager.saved, [])
+
+    def test_no_course_map_is_a_no_op(self):
+        self.runner.ctx.manager = None
+        with mock.patch.object(runner.page_ops, "extract_reading") as extract:
+            self.runner._archive_before_skip(self.page, detection.READING)
+        extract.assert_not_called()
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class UnhandledPageTypeTests(unittest.TestCase):
+    """A type with no handler must not hold the traversal forever."""
+
+    def setUp(self):
+        self.watch = runner.Runner(config.Settings())
+        self.page = FakePage(url="https://www.coursera.org/learn/c/ungradedLab/abc/lab")
+
+    def test_the_first_passes_only_wait(self):
+        with (
+            mock.patch.object(runner.navigation, "advance") as advance,
+            mock.patch.object(runner.time, "sleep") as sleep,
+        ):
+            for _ in range(runner.Runner.UNHANDLED_WAIT_LIMIT - 1):
+                outcome = self.watch._step_past_unhandled(self.page, detection.LAB)
+        self.assertEqual(outcome, runner.handlers.CONTINUE)
+        advance.assert_not_called()
+        self.assertEqual(sleep.call_count, runner.Runner.UNHANDLED_WAIT_LIMIT - 1)
+
+    def test_the_item_is_stepped_past_once_the_wait_is_spent(self):
+        with (
+            mock.patch.object(runner.navigation, "advance", return_value="NAVIGATED") as advance,
+            mock.patch.object(runner.time, "sleep"),
+        ):
+            for _ in range(runner.Runner.UNHANDLED_WAIT_LIMIT):
+                outcome = self.watch._step_past_unhandled(self.page, detection.LAB)
+        advance.assert_called_once()
+        self.assertEqual(outcome, runner.handlers.CONTINUE)
+
+    def test_a_finished_course_is_reported_rather_than_looped(self):
+        with (
+            mock.patch.object(runner.navigation, "advance", return_value="COURSE_COMPLETE"),
+            mock.patch.object(runner.time, "sleep"),
+        ):
+            for _ in range(runner.Runner.UNHANDLED_WAIT_LIMIT):
+                outcome = self.watch._step_past_unhandled(self.page, detection.LAB)
+        self.assertEqual(outcome, runner.handlers.COURSE_COMPLETE)
+
+    def test_each_item_gets_its_own_wait_budget(self):
+        other = FakePage(url="https://www.coursera.org/learn/c/ungradedLab/xyz/lab2")
+        with (
+            mock.patch.object(runner.navigation, "advance") as advance,
+            mock.patch.object(runner.time, "sleep"),
+        ):
+            self.watch._step_past_unhandled(self.page, detection.LAB)
+            self.watch._step_past_unhandled(other, detection.LAB)
+        advance.assert_not_called()
+
+
+class MappedManager:
+    """A manager exposing only the course map the resume scan reads."""
+
+    def __init__(self, course_map):
+        self.course_map = course_map
+
+
+COURSE = "https://www.coursera.org/learn/c"
+FIRST = f"{COURSE}/lecture/aaa/intro"
+SECOND = f"{COURSE}/supplement/bbb/notes"
+THIRD = f"{COURSE}/lecture/ccc/wrap"
+
+
+class ResumeAtFirstIncompleteTests(unittest.TestCase):
+    """The run starts where work is left, not where the tab happens to sit."""
+
+    def setUp(self):
+        self.watch = runner.Runner(config.Settings())
+        self.watch.ctx.manager = MappedManager(
+            {
+                "Week 1": [("Intro", "VIDEO", FIRST, "5 min"), ("Notes", "READING", SECOND, "")],
+                "Week 2": [("Wrap", "VIDEO", THIRD, "3 min")],
+            }
+        )
+        self.page = FakePage(url=FIRST)
+
+    def _resume(self, status):
+        with (
+            mock.patch.object(runner, "get_completion_status", return_value=status),
+            mock.patch.object(runner.time, "sleep"),
+        ):
+            return self.watch._resume_at_first_incomplete(self.page)
+
+    def _paths(self, *pairs):
+        return {runner.urls.normalize_path(url): state for url, state in pairs}
+
+    def test_jumps_over_completed_items_to_the_first_unfinished_one(self):
+        jumped = self._resume(self._paths((FIRST, True), (SECOND, True), (THIRD, False)))
+        self.assertTrue(jumped)
+        self.assertEqual(self.page.goto_calls, [THIRD])
+
+    def test_staying_put_when_the_open_item_is_already_the_first_unfinished(self):
+        jumped = self._resume(self._paths((FIRST, False), (SECOND, False)))
+        self.assertFalse(jumped)
+        self.assertEqual(self.page.goto_calls, [])
+
+    def test_a_fully_complete_course_is_not_navigated(self):
+        jumped = self._resume(self._paths((FIRST, True), (SECOND, True), (THIRD, True)))
+        self.assertFalse(jumped)
+        self.assertEqual(self.page.goto_calls, [])
+
+    def test_rows_whose_state_is_unreadable_are_not_treated_as_unfinished(self):
+        # An unknown row says nothing about its state. Targeting one would send
+        # a run that is near the end of a course back to its beginning.
+        jumped = self._resume({runner.urls.normalize_path(SECOND): True})
+        self.assertFalse(jumped)
+        self.assertEqual(self.page.goto_calls, [])
+
+    def test_no_resume_leaves_the_run_on_the_open_item(self):
+        self.watch.settings = config.Settings(resume_at_incomplete=False)
+        jumped = self._resume(self._paths((FIRST, True), (THIRD, False)))
+        self.assertFalse(jumped)
+        self.assertEqual(self.page.goto_calls, [])
+
+    def test_a_failed_scan_is_not_fatal(self):
+        with mock.patch.object(
+            runner, "get_completion_status", side_effect=RuntimeError("sidebar gone")
+        ):
+            self.assertFalse(self.watch._resume_at_first_incomplete(self.page))
+        self.assertEqual(self.page.goto_calls, [])
+
+
+class TickMutesBeforeAnyPromptTests(unittest.TestCase):
+    """Muting has to happen on the tick, not inside a handler.
+
+    An item the sidebar already marks complete never reaches a handler: the run
+    offers to skip it first, and its narration used to play aloud for the whole
+    length of that prompt.
+    """
+
+    def test_a_completed_item_is_muted_before_the_skip_prompt(self):
+        watch = runner.Runner(config.Settings())
+        page = FakePage(url=f"{COURSE}/supplement/bbb/notes")
+        with (
+            mock.patch.object(runner.Runner, "_detect_stuck", return_value=False),
+            mock.patch.object(runner.Runner, "_sync_course_map", return_value=False),
+            mock.patch.object(runner.Runner, "_log_context"),
+            mock.patch.object(runner.page_ops, "is_locked_item", return_value=False),
+            mock.patch.object(runner.modals, "dismiss_all"),
+            mock.patch.object(runner.detection, "classify", return_value=detection.READING),
+            mock.patch.object(runner.interaction, "silence_media") as silence,
+            mock.patch.object(runner.Runner, "_skip_completed", return_value="SKIPPED") as skip,
+        ):
+            watch._tick(page)
+        silence.assert_called_once_with(page)
+        skip.assert_called_once()
+
+
+class UnmappedCourseTests(unittest.TestCase):
+    """A run with no ledger has to say so, once."""
+
+    def setUp(self):
+        self.watch = runner.Runner(config.Settings())
+
+    def test_a_course_that_cannot_be_named_is_reported_once(self):
+        # _sync_course_map runs on every tick, so the notice has to be raised
+        # once per failure rather than once per poll. Before this it was not
+        # raised at all: nothing was archived and nothing said why.
+        page = FakePage(url="https://www.coursera.org/learn/demo/lecture/a/one")
+        with (
+            mock.patch.object(runner, "get_robust_course_name", return_value=""),
+            capture_console() as console,
+        ):
+            for _ in range(5):
+                self.assertFalse(self.watch._sync_course_map(page))
+
+        self.assertEqual(console.getvalue().lower().count("no ledger"), 1)
+
+    def test_a_lookup_that_raises_is_reported_too(self):
+        page = FakePage(url="https://www.coursera.org/learn/demo/lecture/a/one")
+        with (
+            mock.patch.object(runner, "get_robust_course_name", side_effect=RuntimeError("boom")),
+            capture_console() as console,
+        ):
+            self.assertFalse(self.watch._sync_course_map(page))
+        self.assertIn("no ledger", console.getvalue().lower())
+
+    def test_nothing_is_said_once_a_ledger_is_open(self):
+        page = FakePage(url="https://www.coursera.org/learn/demo/lecture/a/one")
+        self.watch.ctx.manager = mock.Mock()
+        with (
+            mock.patch.object(runner, "get_robust_course_name", return_value=""),
+            capture_console() as console,
+        ):
+            self.assertFalse(self.watch._sync_course_map(page))
+        self.assertNotIn("no ledger", console.getvalue().lower())

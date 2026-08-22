@@ -1,0 +1,32 @@
+name: Release
+
+# Publishing runs only for a pushed version tag. PyPI must be configured once
+# with a trusted publisher for this repository and this workflow, so no API
+# token is stored in the repository.
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install --upgrade pip build twine
+      - run: python -m build
+      - run: python -m twine check dist/*
+      - name: Confirm the tag matches the packaged version
+        run: |
+          version=$(python -c "import phantadex; print(phantadex.__version__)")
+          tag="${GITHUB_REF_NAME#v}"
+          test "$version" = "$tag" || {
+            echo "tag $tag does not match package version $version"; exit 1;
+          }
+      - uses: pypa/gh-action-pypi-publish@release/v1

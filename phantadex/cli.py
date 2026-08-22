@@ -1,0 +1,151 @@
+"""Unified Phantadex command line with ``phantadex`` and ``pdex`` aliases."""
+
+import argparse
+import sys
+
+from . import (
+    __version__,
+    archive,
+    chrome,
+    config,
+    discovery,
+    logs,
+    overview,
+    processes,
+    urls,
+    video,
+    watch,
+)
+from .session import BrowserSession
+
+# One source for the command list: the overview documents each of them, and a
+# command missing from it would be dispatchable but unmentioned by ``-h``.
+COMMANDS = tuple(overview.COMMAND_SUMMARIES)
+
+
+def dex_main(argv=None):
+    """Prints the active course tree without navigating or writing a ledger."""
+    parser = config.add_course_url_arg(
+        config.build_parser("Phantadex Dex — show the active course tree.", "dex")
+    )
+    settings = config.settings_from_args(parser.parse_args(argv))
+    logs.setup(settings.log_level)
+
+    with BrowserSession(settings.cdp_url) as browser_session:
+        page = browser_session.find_course_page(settings.course_url)
+        if page is None:
+            logs.error("No course tab found. Open a course in the debug Chrome first.")
+            return 1
+        course_name = discovery.get_robust_course_name(page)
+        with logs.spinner("generating course map"):
+            course_map = discovery.get_detailed_course_map(page)
+        if not course_map:
+            logs.error("Course tree generation failed.")
+            return 1
+        discovery.print_course_map(
+            course_map,
+            course_name,
+            discovery.get_completion_status(page),
+        )
+    return 0
+
+
+def skip_main(argv=None):
+    """Seeks the active video once to a random point in the configured range."""
+    parser = config.add_course_url_arg(
+        config.build_parser("Phantadex Skip — seek the active video once.", "skip")
+    )
+    parser.add_argument(
+        "--video-skip-range",
+        default=config.DEFAULT_VIDEO_SKIP_RANGE,
+        help=(
+            "Random seek range, e.g. '97.5-98.5%%' or '00:30-01:15' "
+            f"(default: {config.DEFAULT_VIDEO_SKIP_RANGE.replace('%', '%%')})."
+        ),
+    )
+    settings = config.settings_from_args(parser.parse_args(argv))
+    logs.setup(settings.log_level)
+
+    with BrowserSession(settings.cdp_url) as browser_session:
+        page = browser_session.find_course_page(settings.course_url)
+        if page is None:
+            logs.error("No course tab found. Open a video in the debug Chrome first.")
+            return 1
+        return 0 if video.seek_into_range(page, settings.video_skip_range) else 1
+
+
+def discover_main(argv=None):
+    """Re-verifies every schema selector against the live pages of a course.
+
+    Walks the course through the sidebar, probes each selector on the item it
+    lands on, and writes the ones that matched to the user state file, which is
+    layered over the packaged defaults on the next run.
+    """
+    parser = config.add_course_url_arg(
+        config.build_parser(
+            "Phantadex Discover -- re-verify selectors against the live course.", "discover"
+        )
+    )
+    settings = config.settings_from_args(parser.parse_args(argv))
+    logs.setup(settings.log_level)
+    discovery.start_dynamic_observation(settings.cdp_url, settings.course_url)
+    return 0
+
+
+def stop_main(argv=None):
+    """Terminates every Phantadex process on this machine."""
+    parser = argparse.ArgumentParser(
+        prog=config.program_name("stop"),
+        description="Phantadex Stop — end every running Phantadex process.",
+    )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="Show what is running without stopping it.",
+    )
+    args = parser.parse_args(argv)
+    logs.setup("INFO")
+    return processes.list_runs() if args.list else processes.stop_all()
+
+
+def main(argv=None):
+    """Dispatches the package CLI; no command defaults to Phantadex Dex."""
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] in {"-h", "--help", "help"}:
+        print(overview.render())
+        return 0
+    if arguments and arguments[0] == "--version":
+        print(f"phantadex {__version__}")
+        return 0
+
+    if arguments and arguments[0] in COMMANDS:
+        command = arguments.pop(0)
+    elif not arguments or arguments[0].startswith("-") or urls.is_platform_url(arguments[0]):
+        # A bare course link is the default command pointed at that item, so
+        # ``pdex <url>`` reads the course the link names.
+        command = "dex"
+    else:
+        program = config.program_name()
+        print(f"{program}: unknown command {arguments[0]!r}", file=sys.stderr)
+        print(f"Commands: {', '.join(COMMANDS)}", file=sys.stderr)
+        print(f"Run '{program} -h' for what each one does.", file=sys.stderr)
+        return 2
+
+    handlers = {
+        "dex": dex_main,
+        "skip": skip_main,
+        "watch": watch.main,
+        "archive": archive.main,
+        "discover": discover_main,
+        "chrome": chrome.main,
+        "stop": stop_main,
+    }
+    try:
+        return handlers[command](arguments)
+    except KeyboardInterrupt:
+        logs.interrupted()
+        return 0
+    except Exception as exc:
+        logs.get_logger().error("Fatal: %s", exc)
+        logs.get_logger().debug("Traceback:", exc_info=True)
+        return 1

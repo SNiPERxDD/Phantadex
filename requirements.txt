@@ -1,2 +1,6 @@
-playwright
-plyer
+# Runtime pins for a plain `pip install -r` checkout. The authoritative
+# declaration is [project].dependencies in pyproject.toml; keep the two in
+# step when a bound changes here.
+playwright>=1.40,<2
+plyer>=2,<3
+PyYAML>=6,<7

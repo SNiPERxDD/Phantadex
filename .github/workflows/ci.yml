@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install --upgrade pip ruff
+      - run: ruff check phantadex tests scripts
+      - run: ruff format --check phantadex tests scripts
+
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Both ends of the supported range run on Linux and Windows, the two
+          # platforms with their own code paths in the package. The darwin
+          # branches are covered by the macos-latest leg.
+          - os: ubuntu-latest
+            python: '3.11'
+          - os: ubuntu-latest
+            python: '3.13'
+          - os: windows-latest
+            python: '3.11'
+          - os: windows-latest
+            python: '3.13'
+          - os: macos-latest
+            python: '3.13'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e .
+      - run: python run_tests.py
+      - run: python -m pip install build
+      - run: python -m build

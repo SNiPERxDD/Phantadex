@@ -25,8 +25,52 @@ wheels/
 
 # Project Specific
 coursera_transcripts/
+phantadex_archive/
 .frankenreview/
 deleted/
 Plan.md
 visited_history.json
 test_artifacts/
+# Browser profiles / session data -- NEVER commit (contains cookies + saved logins)
+chrome_profile/
+.playwright-mcp/
+user-data-dir/
+*.log
+
+# Local scratch / backups
+*.bak
+log.md
+git_diff_output.txt
+Archive.zip
+.kmesh/
+output/
+
+# Virtual environments
+.venv/
+venv/
+
+# Scraped course content -- may identify the account that scraped it
+course_content.xml
+*_transcripts/
+*.pdex.xml
+*ARCHITECTURE_REVIEW.md
+
+# Discovery state written by 'pdex discover'. Normally kept outside the repo,
+# but PHANTADEX_STATE_DIR can point anywhere, including here.
+verified_selectors.yaml
+backups/
+
+# Editor / tooling local state
+.vscode/
+.idea/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+*.swp
+
+# Local scratch (additional)
+scratch/
+tmp/
+*.tmp
+*.orig
+*.rej
