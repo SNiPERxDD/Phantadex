@@ -1,6 +1,6 @@
 # Phantadex
 
-![Version](https://img.shields.io/badge/version-2.0.0-blue?style=flat-square)
+[![PyPI](https://img.shields.io/pypi/v/phantadex?style=flat-square)](https://pypi.org/project/phantadex/)
 ![Python](https://img.shields.io/badge/python-3.11%2B-green?style=flat-square)
 ![Protocol](https://img.shields.io/badge/protocol-CDP-orange?style=flat-square)
 ![Status](https://img.shields.io/badge/status-Research_Prototype-red?style=flat-square)
@@ -49,20 +49,31 @@ The system requires an initialized debugging interface on the host browser.
 ### A. Environment
 *   **Python:** 3.11+
 *   **Dependencies:** `playwright`, `plyer`, `PyYAML` -- all three are declared in
-    `pyproject.toml`, so `pip install -e .` pulls them in.
+    `pyproject.toml`, so either installation route pulls them in.
 *   **Browser:** Google Chrome. The tool attaches to the browser you already use
     and never launches its own, so Playwright's bundled browsers are not needed.
 
 ### B. Installation
 
-Once the package is on PyPI, both platforms take one command. `pipx` keeps the
+The package is on PyPI, so both platforms take one command. `pipx` keeps the
 tool in its own environment and still puts `pdex` on the PATH:
 
 ```bash
 pipx install phantadex        # or: python -m pip install --user phantadex
 ```
 
-**From a clone (current method, and how to develop):**
+Check it landed, and read the command surface:
+
+```bash
+pdex --version
+pdex -h
+```
+
+An upgrade is `pipx upgrade phantadex`, or `pip install --upgrade phantadex`.
+Selectors learned by `pdex discover` live outside the package (§5), so an
+upgrade or a reinstall does not discard them.
+
+**From a clone (how to develop, and how to run an unreleased change):**
 
 Windows (PowerShell):
 ```powershell

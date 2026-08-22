@@ -23,8 +23,10 @@ only what still constrains the code.
   not `scripts/`, which is not in the wheel -- an index install otherwise had no
   way to start the debug browser. `scripts/start_chrome_debug.py` stays as a
   wrapper. `.github/workflows/release.yml` publishes on a `v*` tag through PyPI
-  trusted publishing, which has to be configured on PyPI once before the first
-  release.
+  trusted publishing; the publisher is registered, and `2.0.0` is released. A
+  release is a version bump in `phantadex/__init__.py` and a matching `vX.Y.Z`
+  tag -- the workflow refuses a tag that disagrees with the packaged version,
+  and PyPI refuses a version already used.
 
 ## Traps
 
