@@ -122,7 +122,9 @@ class MediaGuardTests(unittest.TestCase):
         context = FakeContext()
         self._attach(context)
         self.assertEqual(len(context.init_scripts), 1)
-        self.assertIn("__phantadexMediaGuard", context.init_scripts[0])
+        # Symbol-keyed state only: nothing a page script can find by name.
+        self.assertIn("Symbol.for(", context.init_scripts[0])
+        self.assertNotIn("__phantadexMediaGuard", context.init_scripts[0])
 
     def test_only_platform_tabs_already_open_are_armed(self):
         course = mock.Mock(url="https://www.coursera.org/learn/demo/lecture/aaa/welcome")

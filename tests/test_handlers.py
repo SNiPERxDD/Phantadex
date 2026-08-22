@@ -1,5 +1,6 @@
 """Handler dispatch and the paths a live run rarely reaches."""
 
+import contextlib
 import unittest
 from unittest import mock
 
@@ -205,6 +206,43 @@ class HandlerBehaviourTests(unittest.TestCase):
         self.advance.assert_not_called()
         self.assertEqual(result, handlers.CONTINUE)
 
+    @staticmethod
+    def _video_mocks(watch_side_effect=None):
+        """Stands in for everything a video handle does besides pausing."""
+        return (
+            mock.patch.object(
+                handlers.page_ops, "extract_transcript", return_value=("Transcript text.", "panel")
+            ),
+            mock.patch.object(handlers.video, "mute_and_play"),
+            mock.patch.object(handlers.video, "seek_into_range"),
+            mock.patch.object(handlers.VideoHandler, "_watch", side_effect=watch_side_effect),
+        )
+
+    def _run_video_handle(self, watch_side_effect=None):
+        """Runs VideoHandler.handle with the player paused-path observable."""
+        with contextlib.ExitStack() as stack:
+            for patcher in self._video_mocks(watch_side_effect):
+                stack.enter_context(patcher)
+            pause = stack.enter_context(mock.patch.object(handlers.video, "pause_if_playing"))
+            handlers.VideoHandler().handle(self.page, self.ctx)
+        return pause
+
+    def test_a_finished_video_is_paused_before_the_run_advances(self):
+        # Advancing while the player keeps running reads as an abandoned
+        # session; the run stops playback like a person leaving the item.
+        self.page.url = "https://www.coursera.org/learn/c/lecture/aaa/v"
+        pause = self._run_video_handle()
+        pause.assert_called_once()
+
+    def test_a_video_abandoned_mid_watch_is_not_chased_to_pause(self):
+        self.page.url = "https://www.coursera.org/learn/c/lecture/aaa/v"
+
+        def navigate_away(*_args):
+            self.page.url = "https://www.coursera.org/learn/c/quiz/bbb/q"
+
+        pause = self._run_video_handle(watch_side_effect=navigate_away)
+        pause.assert_not_called()
+
 
 class DialogueHandlerTests(unittest.TestCase):
     """The start/end/confirm sequence a roleplay item needs to count."""
@@ -241,7 +279,9 @@ class DialogueHandlerTests(unittest.TestCase):
             if precondition is not None and precondition not in clicked:
                 return None
             control = FakeLocator(count=1)
-            control.click = mock.Mock(side_effect=lambda: clicked.append(element))
+            # The click now travels through the shared interaction path, which
+            # passes position/timeout kwargs a bare click did not.
+            control.click = mock.Mock(side_effect=lambda **kwargs: clicked.append(element))
             return control
 
         return first_visible, clicked

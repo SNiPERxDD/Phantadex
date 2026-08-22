@@ -11,6 +11,7 @@ from . import (
     detection,
     handlers,
     interaction,
+    jitter,
     logs,
     modals,
     navigation,
@@ -59,8 +60,14 @@ class Runner:
     HANDLER_FAILURE_LIMIT = 3
     # Passes an unclassified page is given before the run steps past it.
     UNHANDLED_WAIT_LIMIT = 3
-    # Settling time after the one-off jump to the first unfinished item.
-    RESUME_SETTLE_SECONDS = 3
+    # Settling time after the one-off jump to the first unfinished item. Drawn
+    # rather than fixed: a repeated exact wait is a cadence, not a pause.
+    RESUME_SETTLE_RANGE = (2.0, 4.5)
+    # Retry waits inside the loop body, each drawn from jitter.
+    NO_TAB_WAIT_RANGE = (4.0, 7.0)
+    DETECTION_RETRY_RANGE = (1.5, 3.0)
+    HANDLER_RETRY_RANGE = (1.5, 3.0)
+    RELOAD_SETTLE_RANGE = (4.0, 7.0)
 
     def run(self):
         """Connects and loops until the course ends or the user interrupts."""
@@ -79,8 +86,8 @@ class Runner:
             while True:
                 page = session.reclaim(page)
                 if page is None:
-                    logs.get_logger().warning("No course tab available. Waiting 5s...")
-                    time.sleep(5)
+                    logs.get_logger().warning("No course tab available. Waiting...")
+                    time.sleep(jitter.duration(*self.NO_TAB_WAIT_RANGE))
                     continue
                 if self._tick(page) == handlers.COURSE_COMPLETE:
                     logs.ok("course traversal complete")
@@ -117,7 +124,7 @@ class Runner:
             page_type = detection.classify(page)
         except Exception as exc:
             log.warning("Content detection failed: %s", exc)
-            time.sleep(2)
+            time.sleep(jitter.duration(*self.DETECTION_RETRY_RANGE))
             return handlers.CONTINUE
 
         handler = handlers.for_page_type(page_type)
@@ -149,7 +156,7 @@ class Runner:
                 logs.warn("item failed repeatedly; advancing to prevent an infinite retry")
                 self._record_failure(page, exc)
                 return self._advance_failed_item(page, item_key)
-            time.sleep(2)
+            time.sleep(jitter.duration(*self.HANDLER_RETRY_RANGE))
             return handlers.CONTINUE
 
     def _step_past_unhandled(self, page, page_type):
@@ -228,7 +235,7 @@ class Runner:
             page.reload()
         except Exception as exc:
             log.debug("Reload failed: %s", exc)
-        time.sleep(5)
+        time.sleep(jitter.duration(*self.RELOAD_SETTLE_RANGE))
         return True
 
     def _video_playing(self, page):
@@ -327,7 +334,7 @@ class Runner:
         except Exception as exc:
             log.warning("Resume navigation to %s failed: %s", target, exc)
             return False
-        time.sleep(self.RESUME_SETTLE_SECONDS)
+        time.sleep(jitter.duration(*self.RESUME_SETTLE_RANGE))
         self.last_context_line = ""
         self.ctx.reset_announcements()
         return True

@@ -36,9 +36,16 @@ FROZEN_TICK_LIMIT = 90
 POST_TARGET_DWELL_RANGE = (2.0, 4.0)
 # Sub-minute dwell for an external resource that only needs its box ticked.
 PLUGIN_DWELL_MINUTES = 0.5
-# Pause between opening a roleplay dialogue and ending it, so the item is not
-# started and closed in the same instant.
-DIALOGUE_DWELL_RANGE = (4.0, 8.0)
+# A roleplay item is a multi-turn conversation for a person, and the platform
+# records how long one stayed open. Opening it and closing it seconds apart
+# reports a session no person had, so the run holds it open for a plausible
+# stretch instead. Nothing is sent -- composing turns is the user's alone.
+DIALOGUE_DWELL_RANGE = (45.0, 120.0)
+# The open stretch is spent in short slices with occasional cursor drift, the
+# way a person sits with a page they are conversing in.
+DIALOGUE_DWELL_SLICE_RANGE = (6.0, 14.0)
+# Pause between dialogue control retries while a control renders.
+DIALOGUE_RETRY_SECONDS_RANGE = (0.8, 1.5)
 # Each dialogue control renders in response to the previous click rather than
 # with the page, so a control is polled for rather than expected to be present.
 DIALOGUE_CONTROL_ATTEMPTS = 10
@@ -139,6 +146,10 @@ class VideoHandler(BaseHandler):
         video.mute_and_play(page)
         video.seek_into_range(page, ctx.settings.video_skip_range)
         self._watch(page, ctx, start_url)
+        if urls.same_item(page.url, start_url):
+            # The run leaves the item once the target is met; a player still
+            # running at that moment reads as an abandoned session.
+            video.pause_if_playing(page)
         return self.advance(page, ctx, start_url)
 
     def _watch(self, page, ctx, start_url):
@@ -196,6 +207,10 @@ class VideoHandler(BaseHandler):
                     f"{timing.format_seconds(snapshot['currentTime'])}"
                     f" / {timing.format_seconds(duration)} · target {target}%",
                 )
+                # Both names are only bound once the player reports a duration,
+                # so the comparison stays inside this block. A player still
+                # loading metadata reports 0, which is the state of every video
+                # on its first tick.
                 if percent >= target:
                     logs.bar_done()
                     logs.ok(f"reached {target}% target")
@@ -203,7 +218,7 @@ class VideoHandler(BaseHandler):
                     return
 
             self._idle_fidget(page)
-            time.sleep(1)
+            time.sleep(jitter.duration(0.8, 1.4))
 
     def _handle_pause(self, page, ctx, snapshot, paused_ticks):
         """Resumes playback after a sustained unexpected pause."""
@@ -425,13 +440,45 @@ class DialogueHandler(BaseHandler):
         # the end sequence below picks it up from wherever it already is.
         if self._control(page, "end") is None and self._click(page, "start"):
             logs.step("dialogue started")
-            time.sleep(jitter.duration(*DIALOGUE_DWELL_RANGE))
+            self._dwell(page, start_url)
 
         if self._end(page):
             logs.ok("dialogue ended")
         else:
             logs.warn("Dialogue did not end; leaving it as it is.")
         return self.advance(page, ctx, start_url)
+
+    def _dwell(self, page, start_url):
+        """Holds the dialogue open for a plausible session length.
+
+        The platform records how long a roleplay session stayed open; closing
+        one seconds after opening it reports a conversation nobody had. The
+        stretch is spent in slices, with the cursor drifting near the middle of
+        the window now and then, and no message is ever composed or sent.
+
+        The dwell runs for minutes, which is long enough for the item to be
+        left from the browser. Each slice re-checks that, and the cursor move
+        is guarded like the viewport read beside it: both talk to a page that
+        may be navigating, and neither is worth failing the item over.
+        """
+        remaining = jitter.duration(*DIALOGUE_DWELL_RANGE)
+        while remaining > 0:
+            slice_seconds = min(remaining, jitter.duration(*DIALOGUE_DWELL_SLICE_RANGE))
+            time.sleep(slice_seconds)
+            remaining -= slice_seconds
+            if not urls.same_item(page.url, start_url):
+                logs.step("dialogue left; ending the dwell")
+                return
+            if random.random() < 0.5:
+                try:
+                    width, height = page.evaluate("() => [window.innerWidth, window.innerHeight]")
+                    interaction.move(
+                        page,
+                        width / 2 + random.randint(-120, 120),
+                        height / 2 + random.randint(-80, 80),
+                    )
+                except Exception as exc:
+                    log.debug("Cursor drift during dialogue dwell failed: %s", exc)
 
     def _end(self, page):
         """Ends a running dialogue and confirms it. Reports whether it finished."""
@@ -442,7 +489,7 @@ class DialogueHandler(BaseHandler):
         for _ in range(DIALOGUE_CONTROL_ATTEMPTS):
             if self._control(page, "finished") is not None:
                 return True
-            time.sleep(1)
+            time.sleep(jitter.duration(*DIALOGUE_RETRY_SECONDS_RANGE))
         return False
 
     @staticmethod
@@ -452,17 +499,22 @@ class DialogueHandler(BaseHandler):
 
     @classmethod
     def _click(cls, page, element):
-        """Clicks a dialogue control once it appears. Reports whether it was clicked."""
+        """Clicks a dialogue control once it appears. Reports whether it was clicked.
+
+        The click goes through the shared interaction path -- approach move,
+        reaction dwell, jittered point, bounded wait -- like every other click
+        the run makes. A bare locator click would teleport the cursor to the
+        element centre and could sit out Playwright's 30-second default on a
+        control that never becomes clickable.
+        """
         for attempt in range(DIALOGUE_CONTROL_ATTEMPTS):
             control = cls._control(page, element)
             if control is not None:
-                try:
-                    control.click()
+                if interaction.click(page, control, reaction_range=(0.4, 0.9)):
                     return True
-                except Exception as exc:
-                    log.debug("Dialogue control %r click failed: %s", element, exc)
+                log.debug("Dialogue control %r was not clickable this pass", element)
             if attempt + 1 < DIALOGUE_CONTROL_ATTEMPTS:
-                time.sleep(1)
+                time.sleep(jitter.duration(*DIALOGUE_RETRY_SECONDS_RANGE))
         return False
 
 

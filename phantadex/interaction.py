@@ -85,7 +85,14 @@ def describe(locator):
         return "unreadable element"
 
 
-def click(page, locator, force=False, reaction_range=(0.4, 0.9), timeout=CLICK_TIMEOUT_MS):
+def click(
+    page,
+    locator,
+    force=False,
+    reaction_range=(0.4, 0.9),
+    timeout=CLICK_TIMEOUT_MS,
+    position=None,
+):
     """Moves to a locator and clicks it. Returns False if it was not clickable.
 
     ``force`` skips Playwright's actionability checks, including whether the
@@ -95,7 +102,14 @@ def click(page, locator, force=False, reaction_range=(0.4, 0.9), timeout=CLICK_T
 
     The click point carries a few pixels of jitter. It is passed as ``position``
     rather than only moved to: without it the cursor visited the offset point and
-    the click still landed on the element's exact centre.
+    the click still landed on the element's exact centre. A caller may pin the
+    point with its own element-relative ``position`` -- a seek landing at a
+    chosen spot on a progress bar, say -- and the jitter is applied around that
+    instead of around the centre.
+
+    No explicit hover precedes the click. Playwright's own click re-resolves the
+    element and moves to ``position`` itself, so an earlier hover only produced
+    several identical mouse-move events at one coordinate.
     """
     try:
         if not locator.is_visible():
@@ -105,27 +119,30 @@ def click(page, locator, force=False, reaction_range=(0.4, 0.9), timeout=CLICK_T
             log.debug("Locator has no bounding box; cannot click")
             return False
 
-        offset_x = box["width"] / 2 + random.randint(-5, 5)
-        offset_y = box["height"] / 2 + random.randint(-5, 5)
+        if position is None:
+            offset_x = box["width"] / 2 + random.randint(-5, 5)
+            offset_y = box["height"] / 2 + random.randint(-5, 5)
+        else:
+            offset_x = position["x"] + random.randint(-3, 3)
+            offset_y = position["y"] + random.randint(-3, 3)
         # Keep the jitter inside the element; a small control can be narrower
         # than the offset range.
         offset_x = min(max(offset_x, 1.0), max(1.0, box["width"] - 1))
         offset_y = min(max(offset_y, 1.0), max(1.0, box["height"] - 1))
-        position = {"x": offset_x, "y": offset_y}
+        click_point = {"x": offset_x, "y": offset_y}
 
         # Read the label before clicking: the control is often replaced by the
         # click that follows, leaving nothing to describe afterwards.
         label = describe(locator) if log.isEnabledFor(logging.DEBUG) else ""
 
-        move(page, box["x"] + offset_x, box["y"] + offset_y)
-        locator.hover(force=force, position=position, timeout=timeout)
+        move(page, box["x"] + click_point["x"], box["y"] + click_point["y"])
         time.sleep(jitter.duration(*reaction_range))
-        locator.click(force=force, position=position, timeout=timeout)
+        locator.click(force=force, position=click_point, timeout=timeout)
         log.debug(
             "clicked %s at (%.0f, %.0f)%s",
             label,
-            box["x"] + offset_x,
-            box["y"] + offset_y,
+            box["x"] + click_point["x"],
+            box["y"] + click_point["y"],
             " (forced)" if force else "",
         )
         return True
@@ -243,16 +260,31 @@ _SILENCE_JS = """
 # of audible autoplay; this mutes at 'loadstart', before a frame is decoded, and
 # again on any attempt to raise the volume afterwards.
 #
-# Scoped to the platform host: the guard is installed on the browser context,
-# which is the user's own default profile, and muting the tabs they open beside
-# a run would be a side effect of automating something else entirely.
-_MEDIA_GUARD_JS = (
-    """
+# The guard leaves no string-named property on ``window``: its state lives
+# behind a symbol, which ``Object.keys`` and ``Object.getOwnPropertyNames`` both
+# miss. The key is stable rather than generated per process. A per-process token
+# was tried and reverted -- it bought no real concealment, because a registered
+# symbol is still reachable through ``Object.getOwnPropertySymbols(window)`` and
+# ``Symbol.keyFor``, and it cost the one thing that matters here: a run killed
+# outright leaves its guard armed, and only a later run holding the same key can
+# release it. With a fresh key per process that tab kept re-muting whatever the
+# user unmuted until they reloaded it, and the next run stacked a second set of
+# listeners on top. Listeners are removed through an AbortController, so
+# releasing needs no handle on the individual listeners.
+#
+# Scoped to the platform host by exact name: a suffix check alone would also arm
+# inside lookalike hosts ("notcoursera.org") and every frame embedded in platform
+# pages. The guard is installed on the browser context, which is the user's own
+# debug profile, and muting tabs they open beside a run on other hosts would be
+# a side effect of automating something else entirely.
+_GUARD_TOKEN = "phantadex-media-guard"
+
+_GUARD_BODY_JS = """
 (() => {
-    if (window.__phantadexMediaGuard) return false;
-    if (!location.hostname.endsWith('"""
-    + urls.PLATFORM_HOST
-    + """')) return false;
+    const key = Symbol.for('TOKEN');
+    if (window[key]) return false;
+    const host = location.hostname;
+    if (host !== 'HOST' && !host.endsWith('.HOST')) return false;
     const silence = (element) => {
         if (!(element instanceof HTMLMediaElement)) return;
         if (element.muted && element.volume === 0) return;
@@ -262,42 +294,18 @@ _MEDIA_GUARD_JS = (
     const onMediaEvent = (event) => silence(event.target);
     const events = ['loadstart', 'loadedmetadata', 'canplay', 'play', 'playing',
                     'volumechange'];
+    const controller = new AbortController();
     for (const type of events) {
-        document.addEventListener(type, onMediaEvent, true);
+        document.addEventListener(type, onMediaEvent,
+            {capture: true, signal: controller.signal});
     }
-    // Programmatic playback can start without any of those events having been
-    // seen yet, so the entry point itself is covered too.
-    const nativePlay = HTMLMediaElement.prototype.play;
-    const play = function () {
-        silence(this);
-        return nativePlay.apply(this, arguments);
-    };
-    // The wrapper answers about itself the way the method it stands in for
-    // would. A player that reads back `play.name` or `String(play)` -- to
-    // re-wrap it, or to check nothing else has -- otherwise sees a stranger.
-    const nativeToString = Function.prototype.toString;
-    Object.defineProperty(play, 'name', { value: 'play', configurable: true });
-    Object.defineProperty(play, 'toString', {
-        value: function () { return nativeToString.call(nativePlay); },
-        configurable: true,
-        writable: true,
-    });
-    HTMLMediaElement.prototype.play = play;
     document.querySelectorAll('audio, video').forEach(silence);
-    window.__phantadexMediaGuard = {
-        release: () => {
-            for (const type of events) {
-                document.removeEventListener(type, onMediaEvent, true);
-            }
-            HTMLMediaElement.prototype.play = nativePlay;
-            delete window.__phantadexMediaGuard;
-            return true;
-        },
-    };
+    window[key] = controller;
     return true;
 })();
 """
-)
+
+_MEDIA_GUARD_JS = _GUARD_BODY_JS.replace("TOKEN", _GUARD_TOKEN).replace("HOST", urls.PLATFORM_HOST)
 
 # Undoes the guard in a document that outlives the run. Elements are left as
 # they are: a tab that was muted stays muted, and the user may raise the volume
@@ -305,11 +313,14 @@ _MEDIA_GUARD_JS = (
 # nobody asked to be sitting at.
 _MEDIA_RELEASE_JS = """
 (() => {
-    const guard = window.__phantadexMediaGuard;
-    if (!guard || typeof guard.release !== 'function') return false;
-    return guard.release();
+    const key = Symbol.for('TOKEN');
+    const controller = window[key];
+    if (!controller || typeof controller.abort !== 'function') return false;
+    controller.abort();
+    delete window[key];
+    return true;
 })();
-"""
+""".replace("TOKEN", _GUARD_TOKEN)
 
 
 def install_media_guard(context):
@@ -325,9 +336,8 @@ def install_media_guard(context):
 def release_media_guard(page):
     """Removes the guard from a document, leaving current media as it is.
 
-    A tab lives on after the run that armed it. Without this the page keeps a
-    wrapped ``play`` and re-mutes anything the user unmutes by hand until they
-    reload it.
+    A tab lives on after the run that armed it. Without this the page keeps
+    re-muting anything the user unmutes by hand until they reload it.
     """
     try:
         return bool(page.evaluate(_MEDIA_RELEASE_JS))

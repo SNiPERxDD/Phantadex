@@ -10,8 +10,11 @@
 
 ## 1. System Overview
 
-Phantadex attaches to an existing, authenticated Chrome session through the
-remote debugging protocol and provides two course workflows.
+Phantadex runs against a Chrome instance it starts for the job: `pdex chrome`
+launches Google Chrome with its remote debugging port open under a dedicated
+profile, you sign in to the course in that window yourself, and every command
+then attaches to it over the DevTools protocol. The tool never handles your
+login and never touches your everyday browser profile.
 
 Product vocabulary:
 
@@ -50,8 +53,9 @@ The system requires an initialized debugging interface on the host browser.
 *   **Python:** 3.11+
 *   **Dependencies:** `playwright`, `plyer`, `PyYAML` -- all three are declared in
     `pyproject.toml`, so either installation route pulls them in.
-*   **Browser:** Google Chrome. The tool attaches to the browser you already use
-    and never launches its own, so Playwright's bundled browsers are not needed.
+*   **Browser:** Google Chrome. Phantadex starts and attaches to its own debug
+    instance under a dedicated profile, so Playwright's bundled browsers are
+    not needed.
 
 ### B. Installation
 
@@ -99,8 +103,8 @@ pip install -e .
 ```
 
 `pip install -e .` pulls in `playwright`, `plyer` and `PyYAML`. Playwright's
-bundled browsers are not needed: the tool attaches to the Chrome you already
-use and never launches one of its own.
+bundled browsers are not needed: the tool drives the Chrome that `pdex chrome`
+starts, not one of its own.
 
 ### C. Launch Configuration (Mandatory)
 
@@ -116,6 +120,11 @@ starts one on a profile kept with the tool's other state, so the courses stay
 signed in between runs. Set `PHANTADEX_CHROME` if Chrome lives somewhere
 unusual, `PHANTADEX_CHROME_PROFILE` to move the profile, and `--cdp-url` to use
 a different port.
+
+> [!NOTE]
+> While this Chrome is running, its debugging port is open on localhost. Any
+> process running as your user can attach to it and act in the signed-in
+> session. Close the debug window (or run `pdex stop`) when you are done.
 
 Manual equivalents, if you would rather not use the launcher:
 

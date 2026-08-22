@@ -55,12 +55,28 @@ class ClickContractTests(unittest.TestCase):
         page, button = self._click()
         position = button.click_kwargs["position"]
         box = button.bounding_box()
-        self.assertEqual(button.hover_kwargs["position"], position)
         self.assertTrue(0 < position["x"] < box["width"])
         self.assertTrue(0 < position["y"] < box["height"])
         self.assertEqual(
             page.mouse.moves[-1],
             (box["x"] + position["x"], box["y"] + position["y"]),
+        )
+
+    def test_an_explicit_position_pins_the_click_point(self):
+        # A seek through the player's progress bar must land at the chosen
+        # fraction of the control, not at its centre.
+        page = FakePage()
+        bar = FakeLocator(count=1, events=page.pointer_events)
+        self.assertTrue(interaction.click(page, bar, position={"x": 90, "y": 10}))
+        clicked = bar.click_kwargs["position"]
+        box = bar.bounding_box()
+        self.assertGreater(clicked["x"], 80)
+        self.assertLess(clicked["x"], 100)
+        self.assertLess(clicked["y"], 15)
+        # The cursor approach ends exactly where the click will land.
+        self.assertEqual(
+            page.mouse.moves[-1],
+            (box["x"] + clicked["x"], box["y"] + clicked["y"]),
         )
 
     def test_the_click_point_is_not_always_the_centre(self):
@@ -70,12 +86,18 @@ class ClickContractTests(unittest.TestCase):
             seen.add((button.click_kwargs["position"]["x"], button.click_kwargs["position"]["y"]))
         self.assertGreater(len(seen), 1)
 
+    def test_no_hover_precedes_the_click(self):
+        # Playwright's click re-resolves the element and moves to the position
+        # itself; an explicit hover only repeated identical mouse-move events
+        # at one coordinate before the press.
+        page, button = self._click()
+        self.assertEqual(button.hover_kwargs, {})
+
     def test_actionability_checks_are_on_by_default(self):
         # `force` skips the "element receives pointer events" check, so a click
         # swallowed by an overlay would be reported as a success.
         _page, button = self._click()
         self.assertFalse(button.click_kwargs["force"])
-        self.assertFalse(button.hover_kwargs["force"])
 
     def test_a_caller_can_still_force_a_click(self):
         _page, button = self._click(force=True)
@@ -255,27 +277,37 @@ class SilenceMediaTests(unittest.TestCase):
 
 class MediaGuardTests(unittest.TestCase):
     def test_the_guard_only_applies_to_the_platform(self):
-        self.assertIn("location.hostname.endsWith", interaction._MEDIA_GUARD_JS)
-        self.assertIn(urls.PLATFORM_HOST, interaction._MEDIA_GUARD_JS)
+        # Exact host match only: a bare suffix check would also arm inside
+        # lookalike hosts such as "notcoursera.org".
+        self.assertIn("location.hostname", interaction._MEDIA_GUARD_JS)
+        self.assertIn(f"host !== '{urls.PLATFORM_HOST}'", interaction._MEDIA_GUARD_JS)
+        self.assertIn(f".endsWith('.{urls.PLATFORM_HOST}')", interaction._MEDIA_GUARD_JS)
 
     def test_the_guard_mutes_before_playback_rather_than_after(self):
         # 'loadstart' is the earliest media event; catching only 'playing'
         # would mean muting a player that is already audible.
         self.assertIn("loadstart", interaction._MEDIA_GUARD_JS)
-        self.assertIn("HTMLMediaElement.prototype.play", interaction._MEDIA_GUARD_JS)
+
+    def test_the_guard_tampers_with_no_prototype(self):
+        # A wrapped play() leaves irregularities a page script can find;
+        # the capture-phase listeners alone reach every element in time.
+        self.assertNotIn(".play =", interaction._MEDIA_GUARD_JS)
+        self.assertNotIn("prototype.play", interaction._MEDIA_GUARD_JS)
+
+    def test_the_guard_leaves_no_named_trace_on_window(self):
+        # The state lives behind a symbol keyed by a per-process token: never
+        # in Object.keys, and unreadable without the token.
+        self.assertIn("Symbol.for(", interaction._MEDIA_GUARD_JS)
+        self.assertNotIn("__phantadexMediaGuard", interaction._MEDIA_GUARD_JS)
+        self.assertNotIn("__phantadexMediaGuard", interaction._MEDIA_RELEASE_JS)
 
     def test_the_guard_can_be_taken_back_off(self):
-        self.assertIn("release", interaction._MEDIA_GUARD_JS)
-        self.assertIn("removeEventListener", interaction._MEDIA_GUARD_JS)
-        self.assertIn("HTMLMediaElement.prototype.play = nativePlay", interaction._MEDIA_GUARD_JS)
+        self.assertIn("AbortController", interaction._MEDIA_GUARD_JS)
+        self.assertIn(".abort()", interaction._MEDIA_RELEASE_JS)
         page = mock.Mock()
         page.evaluate.return_value = True
         self.assertTrue(interaction.release_media_guard(page))
         page.evaluate.assert_called_once_with(interaction._MEDIA_RELEASE_JS)
-
-    def test_the_wrapped_play_answers_about_itself_as_the_native_one_does(self):
-        self.assertIn("'name', { value: 'play'", interaction._MEDIA_GUARD_JS)
-        self.assertIn("nativeToString.call(nativePlay)", interaction._MEDIA_GUARD_JS)
 
     def test_releasing_a_page_without_the_guard_is_not_an_error(self):
         page = mock.Mock()

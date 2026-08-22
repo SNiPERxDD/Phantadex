@@ -581,6 +581,51 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class MetadataLoadingTests(unittest.TestCase):
+    """The watch loop survives the state every video starts in."""
+
+    def test_a_player_still_loading_metadata_does_not_end_the_item(self):
+        """A player reports duration 0 until its metadata arrives.
+
+        The completion check was written outside the block that computes the
+        percentage, so the first tick of every video read a name that had never
+        been bound. The runner caught the error, counted the item as failed
+        three times over and skipped it -- which silently stopped `pdex watch`
+        watching anything at all.
+        """
+        loading = {
+            "duration": 0.0,
+            "currentTime": 0.0,
+            "paused": False,
+            "ended": False,
+            "muted": True,
+        }
+        watching = {
+            "duration": 100.0,
+            "currentTime": 99.0,
+            "paused": False,
+            "ended": False,
+            "muted": True,
+        }
+        page = FakePage(url="https://www.coursera.org/learn/c/lecture/aaa/v")
+        ctx = mock.Mock()
+        ctx.settings.video_completion_threshold = (98.0, 100.0)
+        ctx.settings.paused_iterations_before_resume = 3
+
+        with (
+            mock.patch.object(handlers.video, "state", side_effect=[loading, watching]),
+            mock.patch.object(handlers.modals, "dismiss_all"),
+            mock.patch.object(handlers.time, "sleep"),
+            mock.patch.object(handlers.jitter, "duration", return_value=0),
+            mock.patch.object(handlers.VideoHandler, "_idle_fidget"),
+            mock.patch.object(handlers.random, "uniform", return_value=98.0),
+            capture_console() as console,
+        ):
+            handlers.VideoHandler()._watch(page, ctx, page.url)
+
+        self.assertIn("reached 98.0% target", console.getvalue())
+
+
 class SeekEventTests(unittest.TestCase):
     """The seek must not forge player events."""
 
@@ -590,3 +635,259 @@ class SeekEventTests(unittest.TestCase):
         # was the only event on the page with isTrusted false.
         self.assertNotIn("dispatchEvent", video._SEEK_JS)
         self.assertIn("video.currentTime = targetSeconds", video._SEEK_JS)
+
+
+# The first selector the schema lists for the timeline. Taking it from the
+# schema rather than repeating the string keeps these fakes matching the
+# selector the code will really look for: when the schema still said
+# "div.video-player-progress-bar" -- a selector that matches nothing on the
+# live player, which is a span -- the fakes agreed with it and the tests passed.
+_BAR_SELECTOR = element_schema.ELEMENTS_SCHEMA["video_controls"]["progress_bar"]["selectors"][0]
+
+
+class _SeekingPage(FakePage):
+    """A page whose player reports a scripted sequence of positions."""
+
+    def __init__(self, positions, with_bar=True):
+        locators = {_BAR_SELECTOR: FakeLocator(count=1)} if with_bar else {}
+        super().__init__(url="https://www.coursera.org/learn/c/lecture/aaa/v", locators=locators)
+        self._positions = list(positions)
+
+    def evaluate(self, script, *_args):
+        self.evaluated.append(script)
+        if "currentTime" not in script:
+            return None
+        position = self._positions.pop(0) if self._positions else 99.0
+        if isinstance(position, dict):
+            return position
+        return {
+            "duration": 100.0,
+            "currentTime": position,
+            "paused": False,
+            "ended": False,
+            "muted": True,
+        }
+
+
+class SeekControlTests(unittest.TestCase):
+    """The seek prefers the player's own timeline control over a direct jump."""
+
+    def setUp(self):
+        patcher = mock.patch.object(video.time, "sleep")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        range_patcher = mock.patch.object(video.random, "uniform", return_value=96.0)
+        range_patcher.start()
+        self.addCleanup(range_patcher.stop)
+
+    def test_a_working_progress_bar_click_seeks_without_a_direct_jump(self):
+        page = _SeekingPage([100.0, 10.0, 10.0])
+        self.assertTrue(video.seek_into_range(page, "95-97%"))
+        self.assertNotIn(video._SEEK_JS, page.evaluated)
+
+    def test_a_bar_that_does_not_seek_falls_back_to_the_direct_route(self):
+        # The bar matched but the click moved nothing; reporting success would
+        # leave the run watching from the old position.
+        page = _SeekingPage([100.0, 10.0], with_bar=True)
+        self.assertTrue(video.seek_into_range(page, "95-97%"))
+        self.assertIn(video._SEEK_JS, page.evaluated)
+
+    def test_a_bar_that_clicks_but_does_not_seek_is_not_mistaken_for_one(self):
+        """Playing on is not seeking.
+
+        ``mute_and_play`` runs first, so the position advances about a second
+        per second whatever the click did. Accepting "the position moved" as
+        proof of a seek reported success for a bar that matched and did
+        nothing, and the run then watched from the old position while the log
+        claimed it was near the end.
+        """
+
+        class _PlayingOn(FakePage):
+            def __init__(self):
+                super().__init__(
+                    url="https://www.coursera.org/learn/c/lecture/aaa/v",
+                    locators={_BAR_SELECTOR: FakeLocator(count=1)},
+                )
+                self.position = 10.0
+
+            def evaluate(self, script, *_args):
+                self.evaluated.append(script)
+                if "currentTime" not in script:
+                    return None
+                self.position += 0.5
+                return {
+                    "duration": 600.0,
+                    "currentTime": self.position,
+                    "paused": False,
+                    "ended": False,
+                    "muted": True,
+                }
+
+        page = _PlayingOn()
+        self.assertFalse(video.seek_via_ui(page, 0.96))
+
+    def test_a_click_that_lands_near_the_point_clicked_counts_as_a_seek(self):
+        """A real seek arrives; the check tolerates the pixel it landed on."""
+
+        class _Seeks(FakePage):
+            def __init__(self):
+                super().__init__(
+                    url="https://www.coursera.org/learn/c/lecture/aaa/v",
+                    locators={_BAR_SELECTOR: FakeLocator(count=1)},
+                )
+                self.position = 10.0
+                self.clicked = False
+
+            def evaluate(self, script, *_args):
+                self.evaluated.append(script)
+                if "currentTime" not in script:
+                    return None
+                if self.clicked:
+                    # Landed a few seconds short of 576, as a pixel-wide click
+                    # on a ten-minute video does.
+                    self.position = 570.0
+                self.clicked = True
+                return {
+                    "duration": 600.0,
+                    "currentTime": self.position,
+                    "paused": False,
+                    "ended": False,
+                    "muted": True,
+                }
+
+        page = _Seeks()
+        self.assertTrue(video.seek_via_ui(page, 0.96))
+        self.assertNotIn(video._SEEK_JS, page.evaluated)
+
+    def test_without_a_progress_bar_the_direct_route_still_seeks(self):
+        playing = {
+            "duration": 100.0,
+            "currentTime": 10.0,
+            "paused": False,
+            "ended": False,
+            "muted": True,
+        }
+        page = _SeekingPage([playing, dict(playing)], with_bar=False)
+        self.assertTrue(video.seek_into_range(page, "95-97%"))
+        self.assertIn(video._SEEK_JS, page.evaluated)
+
+    def test_a_drag_handle_is_not_clicked_as_though_it_were_the_timeline(self):
+        """The slider role belongs to the handle, not the bar it rides on.
+
+        Both are visible and both sit in the control bar, so only the width
+        separates them. A click at a fraction of a ten-pixel handle lands in
+        the handle, and the position it seeks to is arbitrary.
+        """
+
+        class _Sized(FakeLocator):
+            def __init__(self, width, **kwargs):
+                super().__init__(**kwargs)
+                self._width = width
+
+            def bounding_box(self):
+                return {"x": 0, "y": 0, "width": self._width, "height": 10}
+
+        class _HandleOnly(FakePage):
+            def __init__(self):
+                super().__init__(
+                    url="https://www.coursera.org/learn/c/lecture/aaa/v",
+                    locators={
+                        # A player the width of a real one, and a candidate the
+                        # width of the handle that rides on its timeline.
+                        "video": _Sized(1239, count=1),
+                        _BAR_SELECTOR: _Sized(10, count=1),
+                    },
+                )
+
+            def evaluate(self, script, *_args):
+                self.evaluated.append(script)
+                if "currentTime" not in script:
+                    return None
+                return {
+                    "duration": 600.0,
+                    "currentTime": 10.0,
+                    "paused": False,
+                    "ended": False,
+                    "muted": True,
+                }
+
+        page = _HandleOnly()
+        self.assertFalse(video.seek_via_ui(page, 0.96))
+        self.assertEqual(page.locator(_BAR_SELECTOR).clicked, 0)
+
+
+class TimelineSchemaTests(unittest.TestCase):
+    """The video controls name the elements they claim to name.
+
+    Checked against the live player: the timeline is a span carrying
+    ``data-testid="video-progress-bar"``, and the only element with a slider
+    role is the ten-pixel drag handle inside it. The schema had named that
+    handle as the timeline, as the current time and, through a last-child
+    fallback, as the duration.
+    """
+
+    def _selectors(self, name):
+        return element_schema.ELEMENTS_SCHEMA["video_controls"][name]["selectors"]
+
+    def test_no_control_is_addressed_by_the_drag_handle(self):
+        handle = ["span[aria-label='Video Progress']", "div[role='slider']"]
+        for name in ("progress_bar", "current_time", "duration"):
+            for selector in self._selectors(name):
+                self.assertNotIn(selector, handle, f"{name} names the drag handle")
+                self.assertNotIn("role='slider'", selector, f"{name} names a slider")
+
+    def test_no_control_is_shared_between_two_categories(self):
+        seen = {}
+        for name, block in element_schema.ELEMENTS_SCHEMA["video_controls"].items():
+            for selector in block["selectors"]:
+                # Play and pause are the same button in two states, so their
+                # selectors are allowed to be distinct but adjacent; anything
+                # else appearing twice means one of the two mappings is wrong.
+                if selector in seen:
+                    self.fail(f"{selector!r} maps to both {seen[selector]} and {name}")
+                seen[selector] = name
+
+    def test_the_timeline_is_not_addressed_as_a_div(self):
+        # The live element is a span; the div form matched nothing at all, so
+        # the first selector tried was dead on every page.
+        for selector in self._selectors("progress_bar"):
+            self.assertFalse(selector.startswith("div."))
+
+
+class PauseControlTests(unittest.TestCase):
+    """Playback is stopped through the control, never by a direct write."""
+
+    def setUp(self):
+        patcher = mock.patch.object(interaction.time, "sleep")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_playing_video_is_paused_through_its_control(self):
+        page = FakePage(
+            url="https://www.coursera.org/learn/c/lecture/aaa/v",
+            evaluate_result={
+                "duration": 100.0,
+                "currentTime": 50.0,
+                "paused": False,
+                "ended": False,
+                "muted": True,
+            },
+            locators={"button[aria-label='Pause']": FakeLocator(count=1)},
+        )
+        self.assertTrue(video.pause_if_playing(page))
+        button = page.locator("button[aria-label='Pause']")
+        self.assertEqual(button.clicked, 1)
+        self.assertFalse(button.click_kwargs["force"])
+
+    def test_a_paused_or_ended_player_is_left_alone(self):
+        page = FakePage(
+            url="https://www.coursera.org/learn/c/lecture/aaa/v",
+            evaluate_result={
+                "duration": 100.0,
+                "currentTime": 50.0,
+                "paused": True,
+                "ended": False,
+                "muted": True,
+            },
+        )
+        self.assertFalse(video.pause_if_playing(page))

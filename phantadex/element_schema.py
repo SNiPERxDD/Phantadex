@@ -35,16 +35,42 @@ ELEMENTS_SCHEMA = {
             ],
             "description": "Video play/pause trigger",
         },
+        "pause_button": {
+            "selectors": [
+                "button[aria-label='Pause']",
+                "button[data-testid='pause-button']",
+                "svg[data-testid='PauseSvg']",
+            ],
+            "description": "Control that stops a playing video",
+        },
+        "progress_bar": {
+            # The seekable timeline is a span, not a div, and the slider role
+            # belongs to the drag handle inside it -- a 10px square. Both of the
+            # selectors that matched the handle are gone from here: a click at a
+            # fraction of a 10px width lands somewhere in the handle rather than
+            # at a timestamp, so matching it is worse than matching nothing. The
+            # rail is kept last because it spans the full timeline like the bar.
+            "selectors": [
+                "[data-testid='video-progress-bar']",
+                ".video-player-progress-bar",
+                ".video-player-progress-bar-rail",
+            ],
+            "description": "Timeline a click can seek through",
+        },
         "current_time": {
+            # The tagless form is the fallback: it survives the element changing
+            # from a span to a div, which is the change this class is likely to
+            # see. A slider is never a timestamp, so no slider selector belongs here.
             "selectors": [
                 "span.current-time-display",
-                "span[aria-label='Video Progress']",
-                "div[role='slider']",
+                ".current-time-display",
             ],
             "description": "Current playback timestamp",
         },
         "duration": {
-            "selectors": ["span.duration-display", "div.video-player-progress-bar span:last-child"],
+            # The former last-child fallback resolved to the progress bar's drag
+            # handle, whose text is empty -- it read as a duration of nothing.
+            "selectors": ["span.duration-display", ".duration-display"],
             "description": "Total video length",
         },
         "mute_button": {

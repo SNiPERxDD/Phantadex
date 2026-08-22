@@ -12,7 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 import phantadex
-from phantadex import cli, config, course_manager, handlers, overview
+from phantadex import cli, config, course_manager, handlers, logs, overview
 from tests.fakes import capture_console
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -405,18 +405,66 @@ class HelpPageTests(unittest.TestCase):
         # rule would raise UnicodeEncodeError on the first line of help.
         self.assertTrue(overview.render().isascii())
 
+    @staticmethod
+    def _in_colour():
+        """Renders the page with the palette forced on.
+
+        ``overview`` reads ``logs.paint`` on each call rather than binding it at
+        import, so replacing it here is enough to colour the page.
+        """
+        with mock.patch.object(logs, "paint", logs._Palette(True)):
+            return overview.render()
+
     def test_no_line_runs_past_eighty_columns(self):
         for line in overview.render().splitlines():
-            self.assertLessEqual(len(line), overview.MAX_PAGE_WIDTH, line)
+            self.assertLessEqual(overview.visible_width(line), overview.MAX_PAGE_WIDTH, line)
+
+    def test_colour_costs_the_page_no_columns(self):
+        # An escape sequence occupies no columns but has a length, so measuring
+        # the raw string would size every rule to the codes above it and wrap
+        # the page at a width no terminal is showing.
+        page = self._in_colour()
+        self.assertIn("\x1b[", page)
+        for line in page.splitlines():
+            self.assertLessEqual(overview.visible_width(line), overview.MAX_PAGE_WIDTH, line)
+
+    def test_colour_changes_nothing_but_the_colour(self):
+        # The coloured and plain pages must be the same page: same text, same
+        # columns, same alignment.
+        stripped = re.sub(r"\x1b\[[0-9;]*m", "", self._in_colour())
+        self.assertEqual(stripped, overview.render())
+
+    def test_the_page_is_plain_when_the_stream_is_not_a_terminal(self):
+        # Redirected help is read by pagers, files and agents; escape codes
+        # would be printed literally into all three.
+        with mock.patch.object(logs, "paint", logs._Palette(False)):
+            self.assertNotIn("\x1b[", overview.render())
 
     def test_every_rule_spans_the_section_under_it(self):
         # A rule shorter than the lines beneath it reads as a broken table.
-        lines = overview.render().splitlines()
-        rules = [line for line in lines if set(line) in ({"-"}, {"="})]
-        self.assertTrue(rules)
-        widest = max(len(line) for line in lines)
-        for rule in rules:
-            self.assertEqual(len(rule), widest)
+        for page in (overview.render(), self._in_colour()):
+            lines = page.splitlines()
+            plain = [re.sub(r"\x1b\[[0-9;]*m", "", line) for line in lines]
+            rules = [line for line in plain if set(line) in ({"-"}, {"="})]
+            self.assertTrue(rules)
+            widest = max(overview.visible_width(line) for line in lines)
+            for rule in rules:
+                self.assertEqual(len(rule), widest)
+
+    def test_the_page_links_the_guide_to_clearing_graded_work(self):
+        # The section says the run leaves graded work alone; the link is how a
+        # reader gets from that sentence to what to do about it.
+        page = self._unwrapped()
+        self.assertIn(overview.USAGE_DOC_PATH, page)
+        self.assertIn(
+            f"{phantadex.REPOSITORY_URL}/blob/main/{overview.USAGE_DOC_PATH}",
+            page,
+        )
+
+    def test_the_linked_guide_exists_in_the_repository(self):
+        # The link is to a path in this repository, so a moved or unstaged file
+        # makes the help page point at a 404.
+        self.assertTrue((PROJECT_ROOT / overview.USAGE_DOC_PATH).is_file())
 
     def test_the_page_names_where_the_project_lives(self):
         self.assertIn(phantadex.REPOSITORY_URL, overview.render())

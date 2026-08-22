@@ -19,14 +19,20 @@ only what still constrains the code.
   instead of reported.
 - The default archive root is `phantadex_archive/`, one ledger per course named
   `<course-slug>.pdex.xml`. Legacy data migrates without overwriting conflicts.
+  Every ledger opens with a generator comment in its prolog naming the tool, its
+  version and the repository. `ElementTree` drops comments when it parses, so
+  the banner is rebuilt by `_write_tree` on every write rather than preserved --
+  which is also what keeps a reopened ledger from stacking one banner per save.
 - Packaging: the Chrome launcher lives in `phantadex/chrome.py` (`pdex chrome`),
   not `scripts/`, which is not in the wheel -- an index install otherwise had no
   way to start the debug browser. `scripts/start_chrome_debug.py` stays as a
   wrapper. `.github/workflows/release.yml` publishes on a `v*` tag through PyPI
-  trusted publishing; the publisher is registered, and `2.0.0` is released. A
+  trusted publishing; the publisher is registered and `2.0.0` is on PyPI. The
+  packaged version is now `2.1.0`, which is not yet tagged or released. A
   release is a version bump in `phantadex/__init__.py` and a matching `vX.Y.Z`
-  tag -- the workflow refuses a tag that disagrees with the packaged version,
-  and PyPI refuses a version already used.
+  tag -- `pyproject.toml` reads the version from that attribute, so there is one
+  place to change. The workflow refuses a tag that disagrees with the packaged
+  version, and PyPI refuses a version already used.
 
 ## Traps
 
@@ -120,7 +126,14 @@ Each of these looks like an accident and is not.
   the tab first, let the helper exit, then start Watch.
 - **The seek script must not dispatch a `timeupdate`.** Assigning `currentTime`
   makes the browser fire seeking, seeked and timeupdate itself; a dispatched
-  copy would be the only script-made event in the package.
+  copy would be the only script-made event in the package. The direct script
+  is also the fallback, not the primary route: the seek first clicks the
+  player's progress bar at the target fraction and confirms playback moved
+  before trusting the click.
+- **A dialogue is held open, not started and closed.** `DialogueHandler` dwells
+  a drawn 45-120 seconds with cursor drift before ending the session; closing
+  seconds after opening reports a zero-turn session no person had. Nothing is
+  ever composed or sent -- that line is the tool's, not the platform's.
 
 ## Design in force
 
@@ -147,26 +160,42 @@ Each of these looks like an accident and is not.
   over the requested span with a 4% chance of a longer pause. Its mean matches
   the uniform draw it replaced, so run pace is unchanged; percentages and pixel
   offsets stay uniform on purpose. Callers sleep on the returned value
-  themselves, so tests that patch a caller's `time.sleep` still work. Watch
-  plays videos through by default (`--skip` restores the seek into
+  themselves, so tests that patch a caller's `time.sleep` still work. Every
+  pacing site draws from a range -- item-transition settles, retry waits,
+  resume/reload settles, transcript toggles, modal dismissals, the video watch
+  tick -- because a fixed value repeated across hundreds of items is a cadence,
+  not a pause. The config-driven `idle_poll_seconds` stays scalar by choice.
+  Watch plays videos through by default (`--skip` restores the seek into
   `97.5-98.5%`), with the completion target sampled once per video from
   `--video-threshold` (default `98-100`); `Settings` normalises a bare number
   into a zero-width range. `--reading-minutes MIN[-MAX]` is the fallback dwell
   when an item exposes no duration.
-- **Clicking.** Every automated click uses the shared pointer-move, hover,
+- **Clicking.** Every automated click uses the shared approach-move,
   randomized-reaction, click path, and passes its pixel jitter as a `position`
-  to both hover and click -- passing it only to the move left every click on the
-  element's exact centre. Clicks are not forced by default: forcing skips
-  Playwright's actionability checks, so a click swallowed by an overlay reported
-  success. The modal path still forces deliberately. The actionability wait is
-  bounded by `interaction.CLICK_TIMEOUT_MS` (5s) rather than Playwright's 30.
+  to the click -- passing it only to the move left every click on the element's
+  exact centre. There is no explicit hover: Playwright's own click re-resolves
+  the element and moves to `position` itself, so an earlier hover only produced
+  several identical mouse-move events at one coordinate before the press. A
+  caller may pin an element-relative `position` (the video seek does) and the
+  jitter applies around that instead of the centre. Clicks are not forced by
+  default: forcing skips Playwright's actionability checks, so a click
+  swallowed by an overlay reported success. The modal path tries unforced
+  first under a short timeout and forces only on failure. The actionability
+  wait is bounded by `interaction.CLICK_TIMEOUT_MS` (5s) rather than
+  Playwright's 30.
 - **Media.** A guard installed on the browser context
   (`interaction.install_media_guard`, armed on open tabs by `BrowserSession`)
   runs before the page's own scripts and mutes at `loadstart`; `silence_media`
-  remains the per-tick sweep. The guard checks the platform host first: the
-  context is the user's own Chrome profile, and muting their unrelated tabs
-  would be a side effect of automating this one. `__exit__` releases it,
-  restoring `HTMLMediaElement.prototype.play`; media is left muted as it stands.
+  remains the per-tick sweep. It leaves nothing findable by name: its state
+  sits behind a symbol registered under a per-process random token, and its
+  listeners are removed through an AbortController. Do not reattach a named
+  handle to `window` and do not wrap `HTMLMediaElement.prototype.play` --
+  both were removed as artifacts a page script could find (an own-property
+  `toString` and a source readable through `Function.prototype.toString.call`),
+  and the capture-phase mutes cover what the wrap did. The host check is exact
+  (`coursera.org` or a subdomain); a bare suffix match also armed inside
+  lookalike hosts such as `notcoursera.org`. `__exit__` releases it; media is
+  left muted as it stands.
 - **Modals.** Every in-video interrupt rule (Reflect, Poll, Question) is
   confined to `modals.IN_VIDEO_SCOPE` -- the dialog roles plus the player's
   `rc-VideoQuiz` container -- with no page fallback. Only Honor Code and the
@@ -233,7 +262,7 @@ ruff check . && ruff format --check .
 ## Verification boundary
 
 - Offline tests, `ruff` and CLI help run without a browser or network. Current
-  gate: 514 tests pass in under a second, `ruff check .` and
+  gate: 543 tests pass in about a second, `ruff check .` and
   `ruff format --check .` both clean.
 - Live CDP work is verified against a real signed-in Chrome: course mapping and
   Dex row states, Watch archiving transcripts and pacing to its completion
@@ -241,6 +270,18 @@ ruff check . && ruff format --check .
   fallback, dialogue completion, bulk Archive over a mapped course, discovery
   terminating on its own, and `pdex stop` finding and ending a real run while
   leaving Chrome up.
+- The timeline seek is verified live end to end, not only in the fakes. Against a
+  real lecture player: the seekable bar is a span 1223px wide inside a 1239px
+  player, a click at fraction 0.7 landed at 107.08s against a 107.18s
+  destination, and `seek_via_ui` returned true without reaching the direct
+  fallback. The same pass confirmed the selectors that carry the slider role
+  resolve to a 10px drag handle, which is what the schema correction is based on.
+- The window the watch loop can meet a player in is real: polled at 50ms after a
+  fresh navigation, the element exists for one tick reporting `duration` NaN and
+  `readyState` 0 before metadata arrives. It is narrow, and the ordinary path
+  does not reach it because muting and seeking come first -- but a player that
+  remounts mid-watch puts the loop back there, which is the case the completion
+  check is written to survive rather than raise through.
 - No live sample of a `Reflect` in-video interrupt has been captured. The rule
   is scoped on the same container as the Poll capture it was built from, which
   covers it whether or not Coursera wraps that variant in a dialog.
@@ -251,3 +292,30 @@ ruff check . && ruff format --check .
   macOS. The floor is 3.11 because 3.10 reaches end of life in October 2026;
   raising it means editing `requires-python`, the ruff `target-version` and the
   matrix together.
+
+## Known open items
+
+Deliberately deferred from the interaction-hardening pass of 2026-08-22.
+Each was identified and sized; none is an accident.
+
+- **Curve-based mouse movement, bursty wheel modelling, Gaussian click
+  offsets, a drifting scroll anchor.** Mouse paths still interpolate linearly
+  and the micro-event stream (wheel chunk sizes, inter-chunk gaps, pass deltas)
+  is still uniform-drawn. Only pays off against platforms that run
+  behavioural-biometrics defences, which this one does not currently deploy;
+  the fidget during video playback also still jumps to random absolute points
+  through its own raw `mouse.move`.
+- **Scroller diagnosis ahead of the `scrollTop` fallback.** The JS fallback
+  fires scroll events with no preceding input; it stays because some containers
+  ignore synthesised wheel events and without it reading sessions sit still.
+  The root-cause fix is verifying the chosen scroller responds to a probe tick.
+- **UI-first mute/play everywhere.** Programmatic `play()` and `muted`/`volume`
+  writes remain as fallbacks when player controls are absent, and
+  `silence_media` still sweeps every reading tick (throttling risks a lazily
+  inserted narration player playing aloud).
+- **Optional user-authored dialogue turns.** Needs a keyboard primitive the
+  package deliberately lacks, and composing content crosses the tool's stated
+  line; only worth adding as opt-in with user-supplied text.
+- **Ephemeral CDP port instead of fixed 9222.** Changes the launch contract
+  (`--cdp-url`, manual launcher equivalents); for now the exposure while the
+  debug window lives is documented in `README.md`.

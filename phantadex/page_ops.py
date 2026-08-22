@@ -9,7 +9,7 @@ import random
 import re
 import time
 
-from . import interaction, logs, schema, urls
+from . import interaction, jitter, logs, schema, urls
 from . import text as text_utils
 
 log = logs.get_logger("page_ops")
@@ -48,7 +48,9 @@ def page_context(page):
 def is_already_completed(page):
     """Reports whether the sidebar or item header marks this item complete."""
     try:
-        time.sleep(1.5)  # let the sidebar finish its transition
+        # Let the sidebar finish its transition; drawn, not fixed, so the
+        # pre-completion pause is not an identical beat on every item.
+        time.sleep(jitter.duration(1.0, 2.2))
         current_url = page.url
 
         # Coursera renders more than one link to the active item (the outline row
@@ -129,7 +131,7 @@ def _transcript_from_panel(page):
         tab = schema.first_visible(page, "transcript", "transcript_container")
         if tab is not None and tab.evaluate("el => el.tagName").lower() == "button":
             if interaction.click(page, tab, reaction_range=(0.2, 0.5)):
-                time.sleep(1.5)
+                time.sleep(jitter.duration(1.0, 2.2))
     except Exception as exc:
         log.debug("Transcript tab toggle failed: %s", exc)
 
@@ -154,7 +156,7 @@ def _transcript_from_download(page):
                 return None
             if not interaction.click(page, downloads_tab, reaction_range=(0.2, 0.5)):
                 return None
-            time.sleep(2)
+            time.sleep(jitter.duration(1.4, 2.6))
             link = _first_visible_transcript_download(page)
         if link is None:
             return None

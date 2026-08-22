@@ -5,7 +5,7 @@ import statistics
 import unittest
 from unittest import mock
 
-from phantadex import handlers, interaction, jitter
+from phantadex import handlers, interaction, jitter, navigation
 
 
 class DurationShapeTests(unittest.TestCase):
@@ -83,6 +83,17 @@ class WiringTests(unittest.TestCase):
     def test_the_reading_pause_and_post_target_dwell_have_ranges(self):
         self.assertEqual(interaction.READING_PAUSE_RANGE, (2.5, 6.0))
         self.assertEqual(handlers.POST_TARGET_DWELL_RANGE, (2.0, 4.0))
+
+    def test_the_settle_and_dialogue_waits_are_ranges_not_constants(self):
+        # A fixed value repeated across hundreds of items is a cadence no
+        # person produces; every pacing site draws from a range instead.
+        for low, high in (
+            navigation.SETTLE_RANGE,
+            handlers.DIALOGUE_DWELL_RANGE,
+            handlers.DIALOGUE_DWELL_SLICE_RANGE,
+            handlers.DIALOGUE_RETRY_SECONDS_RANGE,
+        ):
+            self.assertLess(low, high)
 
     def test_click_jitter_stays_uniform(self):
         # Skewing a pixel offset would bias every click toward one edge of the

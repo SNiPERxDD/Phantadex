@@ -7,9 +7,11 @@ import tempfile
 import threading
 import unittest
 import xml.etree.ElementTree as ET
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+import phantadex
 from phantadex import course_manager as course_manager_module
 from phantadex import storage
 from phantadex.course_manager import CourseManager
@@ -49,6 +51,54 @@ class SetupTests(CourseManagerTestCase):
 
     def test_ledger_uses_the_course_slug(self):
         self.assertEqual(os.path.basename(self.manager.xml_path), "demo.pdex.xml")
+
+
+class LedgerBannerTests(CourseManagerTestCase):
+    """Every ledger says what wrote it and where that came from."""
+
+    def _ledger(self):
+        with open(self.manager.xml_path, encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_the_ledger_names_the_tool_its_version_and_its_home(self):
+        ledger = self._ledger()
+        self.assertIn(f"Phantadex {phantadex.__version__}", ledger)
+        self.assertIn(phantadex.REPOSITORY_URL, ledger)
+
+    def test_the_banner_sits_above_the_root_element(self):
+        # A generator note belongs in the prolog. Placed inside <course> it
+        # would read as data, and anything walking the tree would meet it.
+        ledger = self._ledger()
+        self.assertLess(ledger.index("<!--"), ledger.index("<course"))
+        self.assertTrue(ledger.startswith("<?xml"))
+
+    def test_the_banner_leaves_the_ledger_parseable(self):
+        tree = ET.parse(self.manager.xml_path)
+        self.assertEqual(tree.getroot().tag, "course")
+        self.assertTrue(tree.getroot().findall(".//item"))
+
+    def test_a_rewritten_ledger_carries_exactly_one_banner(self):
+        # ElementTree drops comments when it parses, so the banner is rebuilt
+        # on each write. Appending it instead would stack one per save.
+        self.manager.save_content("/learn/demo/lecture/aaa/welcome", "text", "Transcript")
+        self.manager.save_content("/learn/demo/lecture/aaa/welcome", "text again", "Transcript")
+        self.assertEqual(self._ledger().count(phantadex.REPOSITORY_URL), 1)
+
+    def test_the_banner_carries_nothing_about_the_machine_or_the_account(self):
+        # The file is the user's to share; the note identifies the tool, not them.
+        banner = course_manager_module._ledger_banner()
+        self.assertNotIn(str(Path.home()), banner)
+        # Read from the environment rather than os.getlogin(), which raises
+        # when the process has no controlling terminal, as on a CI runner.
+        account = os.environ.get("USER") or os.environ.get("USERNAME")
+        if account:
+            self.assertNotIn(account, banner)
+
+    def test_the_banner_is_a_well_formed_xml_comment(self):
+        # "--" is forbidden inside a comment and a comment may not end with "-".
+        body = course_manager_module._ledger_banner()
+        self.assertTrue(body.startswith("<!--") and body.endswith("-->"))
+        self.assertNotIn("--", body[4:-3])
 
 
 class LegacyMigrationTests(unittest.TestCase):

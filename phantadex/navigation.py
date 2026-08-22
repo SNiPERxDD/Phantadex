@@ -6,11 +6,13 @@ blocks that appeared in the video, reading, quiz and plugin branches.
 
 import time
 
-from . import interaction, logs, schema, urls
+from . import interaction, jitter, logs, schema, urls
 
 log = logs.get_logger("navigation")
 
-SETTLE_SECONDS = 5
+# Every item transition ends in a settle. A fixed value repeated across
+# hundreds of items is a cadence no person produces, so the wait is drawn.
+SETTLE_RANGE = (3.5, 6.5)
 MOVE_TIMEOUT_SECONDS = 8
 MOVE_POLL_SECONDS = 0.5
 
@@ -71,7 +73,7 @@ def advance(page, manager, start_url=None, reaction_range=(0.8, 1.8)):
                 # some item types the click is a no-op. Without this check the
                 # caller believes it moved and re-processes the same item.
                 if _wait_for_move(page, origin):
-                    time.sleep(SETTLE_SECONDS)
+                    time.sleep(jitter.duration(*SETTLE_RANGE))
                     return "NAVIGATED"
                 log.debug("Next click did not change the item; using ledger fallback")
         except Exception as exc:
@@ -95,7 +97,7 @@ def retreat(page, manager, start_url=None, reaction_range=(0.8, 1.8)):
         try:
             if interaction.click(page, button, reaction_range=reaction_range):
                 if _wait_for_move(page, origin):
-                    time.sleep(SETTLE_SECONDS)
+                    time.sleep(jitter.duration(*SETTLE_RANGE))
                     return "NAVIGATED"
                 log.debug("Previous click did not change the item; using map fallback")
         except Exception as exc:
@@ -115,7 +117,7 @@ def retreat(page, manager, start_url=None, reaction_range=(0.8, 1.8)):
     logs.nav(f"map retreat {previous_url}")
     try:
         page.goto(previous_url)
-        time.sleep(SETTLE_SECONDS)
+        time.sleep(jitter.duration(*SETTLE_RANGE))
         return "NAVIGATED"
     except Exception as exc:
         log.warning("Map retreat to %s failed: %s", previous_url, exc)
@@ -161,7 +163,7 @@ def _ledger_fallback(page, manager):
     logs.nav(f"map navigate {next_url}")
     try:
         page.goto(next_url)
-        time.sleep(SETTLE_SECONDS)
+        time.sleep(jitter.duration(*SETTLE_RANGE))
         return "NAVIGATED"
     except Exception as exc:
         log.warning("Map navigation to %s failed: %s", next_url, exc)

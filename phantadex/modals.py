@@ -7,11 +7,18 @@ check silently skipped Honor Code *and* Reflect handling for the whole run.
 
 import time
 
-from . import logs
+from . import jitter, logs
 
 log = logs.get_logger("modals")
 
 DIALOG_SELECTOR = "[role='dialog'], [aria-modal='true']"
+
+# First click attempt keeps Playwright's actionability checks on, with a short
+# wait of its own so an animating overlay costs a moment rather than the run;
+# only a failed attempt falls back to forcing through.
+MODAL_CLICK_TIMEOUT_MS = 1500
+# Pause after a successful dismissal, drawn like every other pacing gap.
+DISMISS_PAUSE_RANGE = (0.6, 1.5)
 
 # Headings already reported as unclearable, so the warning is not repeated on
 # every tick the modal stays on screen.
@@ -101,13 +108,25 @@ def _dismiss_one(page, heading, heading_selector, button_labels, message, scope=
                 # Lazy import avoids the interaction -> modals module cycle.
                 from . import interaction
 
-                if not interaction.click(page, button, force=True, reaction_range=(0.2, 0.5)):
+                unforced = interaction.click(
+                    page, button, reaction_range=(0.2, 0.5), timeout=MODAL_CLICK_TIMEOUT_MS
+                )
+                forced = False
+                if not unforced:
+                    forced = interaction.click(
+                        page,
+                        button,
+                        force=True,
+                        reaction_range=(0.2, 0.5),
+                        timeout=MODAL_CLICK_TIMEOUT_MS,
+                    )
+                if not (unforced or forced):
                     continue
                 # Logged after the click, not before: an earlier version
                 # announced the dismissal up front, so the log claimed success
                 # even when no button matched.
                 logs.step(message)
-                time.sleep(1)
+                time.sleep(jitter.duration(*DISMISS_PAUSE_RANGE))
                 return True
         except Exception as exc:
             log.debug("Could not click %r on %r modal: %s", label, heading, exc)

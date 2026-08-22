@@ -64,13 +64,53 @@ class _Palette:
         return self(36, text)
 
 
+def _enable_windows_ansi():
+    """Turns on VT processing so a Windows console renders ANSI rather than echoing it.
+
+    Windows Terminal enables this itself; the classic console host does not, and
+    without it every escape sequence is printed literally. Failure is silent and
+    means only that the console stays uncoloured.
+
+    The handle is pointer-wide. ``ctypes`` assumes an undeclared function returns
+    a 32-bit signed int, which truncates a 64-bit handle and then fails on every
+    call that receives it, so the boundary is declared before it is crossed.
+    """
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.GetStdHandle.restype = wintypes.HANDLE
+        kernel32.GetStdHandle.argtypes = [wintypes.DWORD]
+        kernel32.GetConsoleMode.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        kernel32.GetConsoleMode.restype = wintypes.BOOL
+        kernel32.SetConsoleMode.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel32.SetConsoleMode.restype = wintypes.BOOL
+
+        handle = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
+        if not handle or handle == wintypes.HANDLE(-1).value:
+            return
+        mode = wintypes.DWORD()
+        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            return
+        kernel32.SetConsoleMode(handle, mode.value | 0x0004)
+    except Exception:  # pragma: no cover - absent console, or a stubbed kernel32
+        return
+
+
 def _colour_enabled(stream):
     """Colour is opt-out via NO_COLOR and never used for redirected output."""
     if os.environ.get("NO_COLOR"):
         return False
     if os.environ.get("FORCE_COLOR"):
+        _enable_windows_ansi()
         return True
-    return bool(getattr(stream, "isatty", lambda: False)())
+    if not getattr(stream, "isatty", lambda: False)():
+        return False
+    _enable_windows_ansi()
+    return True
 
 
 paint = _Palette(_colour_enabled(sys.stdout))
