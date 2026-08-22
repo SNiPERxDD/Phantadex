@@ -207,7 +207,11 @@ Sign in to the course in that window, then leave it open.
     Walks the course through the sidebar, probes every selector on the item it
     lands on, and writes the ones that matched to the verified-selector state
     file (§5). Run it when the site's markup changes. It stops on its own once
-    each content type the course contains has been verified.
+    each content type the course contains has been verified, or once no route to
+    the remaining ones is left -- naming them when it closes. Each type is
+    visited once, and a selector is only recorded if it ranks no lower than the
+    one already in force, so a control that happens to be on screen cannot
+    displace the container it belongs to.
     ```bash
     pdex discover
     # Same pass, with every probe and hop logged

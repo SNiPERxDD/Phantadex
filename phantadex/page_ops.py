@@ -163,15 +163,31 @@ def _transcript_from_download(page):
         with page.expect_download(timeout=10000) as download_info:
             if not interaction.click(page, link, reaction_range=(0.2, 0.5)):
                 raise RuntimeError("Transcript download link was not clickable")
-        temp_path = download_info.value.path()
+        download = download_info.value
+        temp_path = download.path()
         if temp_path and os.path.exists(temp_path):
-            with open(temp_path, encoding="utf-8", errors="ignore") as handle:
-                text = handle.read().strip()
+            try:
+                with open(temp_path, encoding="utf-8", errors="ignore") as handle:
+                    text = handle.read().strip()
+            finally:
+                # Playwright clears a download when its context closes. This
+                # context is the user's own Chrome, attached to over CDP, and it
+                # does not close -- so a bulk archive would leave one temporary
+                # file per transcript behind for as long as the browser lives.
+                _discard_download(download)
             if text:
                 return text
     except Exception as exc:
         log.debug("Transcript download fallback failed: %s", exc)
     return None
+
+
+def _discard_download(download):
+    """Removes a downloaded file, ignoring a browser that has already gone."""
+    try:
+        download.delete()
+    except Exception as exc:
+        log.debug("Discarding the downloaded transcript failed: %s", exc)
 
 
 def _first_visible_transcript_download(page, download_attribute_only=False):

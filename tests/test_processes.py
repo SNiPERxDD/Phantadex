@@ -28,6 +28,31 @@ class CommandRecognitionTests(unittest.TestCase):
         self.assertFalse(processes.is_phantadex_command("grep -rn pdex src"))
         self.assertFalse(processes.is_phantadex_command("vim notes-about-phantadex"))
 
+    def test_a_file_named_to_another_program_is_not_a_run(self):
+        # The matcher used to accept any token that looked like a path, whatever
+        # was running it. Editing, staging or reading a launcher would then have
+        # the editor killed under the user by ``pdex stop``.
+        for command in (
+            "vim phantadex_watch.py",
+            "git commit -m fix phantadex_watch.py",
+            "cat ./phantadex_archive.py",
+            "tail -f logs/pdex",
+            "cp phantadex_watch.py backup/",
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(processes.is_phantadex_command(command))
+
+    def test_a_script_run_by_an_interpreter_is_still_a_run(self):
+        for command in (
+            "python3 phantadex_watch.py",
+            "python3.13 ./phantadex_archive.py --force",
+            "/usr/bin/python phantadex_watch.py",
+            "py.exe phantadex_watch.py",
+            r"C:\\Python313\\python.exe C:\\src\\phantadex_watch.py",
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(processes.is_phantadex_command(command))
+
     def test_an_unrelated_module_is_not_a_run(self):
         self.assertFalse(processes.is_phantadex_command("python -m phantadexter"))
 

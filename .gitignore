@@ -52,7 +52,13 @@ venv/
 # Scraped course content -- may identify the account that scraped it
 course_content.xml
 *_transcripts/
-COURSERA_ARCHITECTURE_REVIEW.md
+*.pdex.xml
+*ARCHITECTURE_REVIEW.md
+
+# Discovery state written by 'pdex discover'. Normally kept outside the repo,
+# but PHANTADEX_STATE_DIR can point anywhere, including here.
+verified_selectors.yaml
+backups/
 
 # Editor / tooling local state
 .vscode/

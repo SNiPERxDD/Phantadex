@@ -17,3 +17,9 @@ class ObservationState:
     required_types: set = field(default_factory=set)
     course_map: dict = None
     mapped: bool = False
+    # Types already jumped to. A sidebar row's type and the type the page
+    # reports need not agree, so a target can be visited without ever clearing
+    # itself off the missing list. Without this, the run jumps to the same item
+    # forever: the second hop lands on the URL already open, the loop's
+    # change check never fires again, and the poll spins in silence.
+    attempted_types: set = field(default_factory=set)

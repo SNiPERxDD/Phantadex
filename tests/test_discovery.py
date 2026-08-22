@@ -178,10 +178,15 @@ class CategoryFilterTests(unittest.TestCase):
         for page_type in probing.RELEVANT_CATEGORIES:
             self.assertIn("sidebar", discovery.categories_to_scan(page_type), page_type)
 
-    def test_an_unknown_page_type_scans_everything(self):
-        self.assertEqual(
-            set(discovery.categories_to_scan("UNKNOWN")), set(element_schema.ELEMENTS_SCHEMA)
-        )
+    def test_an_uncharacterised_page_type_scans_only_the_common_categories(self):
+        # Scanning the whole schema on a page nobody has characterised is how a
+        # content selector comes to be "verified" against an unrelated element
+        # that happened to match, and a verified selector outranks the shipped
+        # default until the next discovery run.
+        for page_type in ("UNKNOWN", "WRAPUP", "SURVEY", "FILLER"):
+            scanned = set(discovery.categories_to_scan(page_type))
+            self.assertEqual(scanned, set(probing._COMMON), page_type)
+            self.assertNotIn("content", scanned, page_type)
 
 
 class HrefMatchTests(unittest.TestCase):
@@ -409,12 +414,18 @@ class SelectorDiscoveryFlowTests(unittest.TestCase):
             findings = probing.discover_selectors(page, state)
 
         self.assertEqual(state.discovered_types, {"VIDEO"})
-        self.assertIs(state.selectors, findings)
+        # What is saved is seeded from the learned state, so writing it cannot
+        # bury the packaged defaults.
+        saved = save.call_args.args[0]
         self.assertEqual(
-            findings["transcript"]["downloads_tab"],
+            saved["transcript"]["downloads_tab"],
             "[data-testid='item-tool-panel-button-files']",
         )
-        save.assert_called_once_with(findings)
+        # What is handed back is the merged view. Returning the narrow state
+        # mapping instead left the next pass reading every shipped default as
+        # absent, and the hop between items lost navigation.next_item.
+        self.assertIs(state.selectors, findings)
+        self.assertIn("next_item", findings["navigation"])
 
 
 class PackageBoundaryTests(unittest.TestCase):
@@ -663,3 +674,164 @@ class CoachPracticeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SelectorEntryShapeTests(unittest.TestCase):
+    """An element may hold a list of selectors in preference order."""
+
+    def test_the_effective_value_of_a_list_is_its_first_entry(self):
+        self.assertEqual(probing._split_selectors(["a", "b"]), ("a", ["b"]))
+
+    def test_a_plain_string_has_no_alternatives(self):
+        self.assertEqual(probing._split_selectors("a"), ("a", []))
+
+    def test_a_missing_entry_reads_as_empty(self):
+        self.assertEqual(probing._split_selectors(None), ("", []))
+
+    def test_a_new_head_keeps_the_fallbacks_behind_it(self):
+        # Storing the probe result as a bare string collapsed the entry to its
+        # new head and dropped every selector kept behind it as a fallback.
+        self.assertEqual(probing._with_alternatives("new", ["old", "spare"]), ["new", "spare"])
+
+    def test_a_promoted_fallback_is_not_listed_twice(self):
+        self.assertEqual(probing._with_alternatives("spare", ["old", "spare"]), "spare")
+
+    def test_a_single_selector_stays_a_string(self):
+        # The superseded head is replaced, not appended: that is what MODIFIED
+        # means, and re-adding it every pass would grow the entry without bound.
+        self.assertEqual(probing._with_alternatives("new", "old"), "new")
+
+
+class HopTargetTests(unittest.TestCase):
+    """A sidebar target is jumped to once, whatever the page then reports."""
+
+    class _HopPage(FakePage):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self.visited = []
+
+        def goto(self, url, **kwargs):
+            self.visited.append(url)
+            self.url = url
+
+    def _state(self):
+        state = ObservationState()
+        state.required_types = {"QUIZ"}
+        state.mapped = True
+        return state
+
+    def test_a_target_that_does_not_clear_itself_is_not_jumped_to_twice(self):
+        # A row typed QUIZ in the sidebar need not report QUIZ once open. The
+        # second hop landed on the URL already loaded, so the poll's change
+        # check never fired again and the run span in silence.
+        page = self._HopPage(url="/learn/demo/lecture/a/one")
+        state = self._state()
+        targets = {"QUIZ": "/learn/demo/quiz/q/exam"}
+        with (
+            mock.patch.object(observation, "get_sidebar_targets", return_value=targets),
+            mock.patch.object(observation, "auto_hop_next", return_value=False) as fallback,
+            capture_console(),
+        ):
+            self.assertTrue(observation.auto_hop_smart(page, {}, state))
+            self.assertFalse(observation.auto_hop_smart(page, {}, state))
+
+        self.assertEqual(len(page.visited), 1)
+        self.assertEqual(state.attempted_types, {"QUIZ"})
+        fallback.assert_called_once()
+
+    def test_the_close_message_names_what_was_never_verified(self):
+        state = self._state()
+        with capture_console() as console:
+            observation._report_close(state)
+        self.assertIn("QUIZ", console.getvalue())
+
+    def test_a_finished_run_closes_without_a_warning(self):
+        state = self._state()
+        state.discovered_types = {"QUIZ"}
+        with capture_console() as console:
+            observation._report_close(state)
+        self.assertIn("objective achieved", console.getvalue())
+
+
+class ObserveResilienceTests(unittest.TestCase):
+    """One unreadable page must not end the whole discovery session."""
+
+    class _Context:
+        def __init__(self, pages):
+            self.pages = pages
+
+    def test_a_failing_item_is_skipped_rather_than_ending_the_run(self):
+        # A tab caught mid-navigation, or a frame detached under the probe,
+        # used to propagate out of the poll and stop the session outright.
+        page = FakePage(url="https://www.coursera.org/learn/demo/lecture/a/one")
+        state = ObservationState(required_types={"VIDEO"}, mapped=True)
+        calls = []
+
+        def _probe(_page, _state):
+            calls.append(1)
+            if len(calls) == 1:
+                raise RuntimeError("frame detached")
+            _state.discovered_types.add("VIDEO")
+            return {}
+
+        def _advance_the_tab(_seconds):
+            # The skipped item is marked seen, so only a genuine navigation
+            # brings the poll back to work -- which is what this stands in for.
+            page.url = "https://www.coursera.org/learn/demo/lecture/b/two"
+
+        with (
+            mock.patch.object(probing, "discover_selectors", side_effect=_probe),
+            mock.patch.object(observation, "auto_hop_smart", return_value=True),
+            mock.patch.object(observation.time, "sleep", side_effect=_advance_the_tab),
+            capture_console() as console,
+        ):
+            observation._observe(self._Context([page]), state)
+
+        self.assertEqual(len(calls), 2)
+        self.assertIn("could not be read", console.getvalue())
+        self.assertIn("all identified course types verified", console.getvalue())
+
+
+class PreferenceOrderTests(unittest.TestCase):
+    """A probe result is only recorded when it improves on what is in effect."""
+
+    ELEMENT = {"selectors": [".rc-Transcript", ".rc-TranscriptHighlighter", "button:has-text('T')"]}
+
+    def test_a_lower_ranked_match_does_not_displace_a_higher_one(self):
+        # The transcript panel is hidden while closed, leaving only its toggle
+        # on screen. Recording the toggle inverted the shipped preference and
+        # left every later scrape reading the player's control text.
+        self.assertTrue(
+            probing._ranks_below(self.ELEMENT, "button:has-text('T')", ".rc-Transcript")
+        )
+
+    def test_a_higher_ranked_match_is_still_an_upgrade(self):
+        self.assertFalse(
+            probing._ranks_below(self.ELEMENT, ".rc-Transcript", "button:has-text('T')")
+        )
+
+    def test_a_selector_outside_the_shipped_list_is_not_ranked(self):
+        self.assertFalse(probing._ranks_below(self.ELEMENT, ".rc-Transcript", ".learned"))
+        self.assertFalse(probing._ranks_below(self.ELEMENT, ".learned", ".rc-Transcript"))
+
+    def test_the_toggle_is_not_written_over_the_container(self):
+        # End to end: only the toggle is on screen, and the shipped default
+        # names the container. Nothing is recorded, because a match further
+        # down the list is not news.
+        toggle = "button:has-text('Transcript')"
+        baseline = {"transcript": {"transcript_container": ".rc-Transcript"}}
+        page = FakePage(locators={toggle: FakeLocator(count=1, text="Transcript")})
+        # Seeded the way start_dynamic_observation seeds it: the effective
+        # selectors as they stand before this pass.
+        state = ObservationState(selectors=baseline)
+        with (
+            mock.patch.object(probing, "_save_findings") as save,
+            mock.patch.object(probing.schema, "state_selectors", return_value=baseline),
+            mock.patch.object(probing.schema, "verified_selectors", return_value=baseline),
+            mock.patch.object(probing.rules, "detect_page_type", return_value="VIDEO"),
+            mock.patch("time.sleep"),
+            capture_console(),
+        ):
+            probing.discover_selectors(page, state)
+
+        save.assert_not_called()

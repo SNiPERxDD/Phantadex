@@ -130,8 +130,14 @@ _HIGHLIGHT_JS = """(sel) => {
 
 
 def categories_to_scan(page_type):
-    """Returns the schema categories relevant to one page type."""
-    return RELEVANT_CATEGORIES.get(page_type, tuple(ELEMENTS_SCHEMA))
+    """Returns the schema categories relevant to one page type.
+
+    A type with no entry of its own -- WRAPUP, SURVEY, FILLER, UNKNOWN -- falls
+    back to the categories every page has, not to the whole schema. Scanning
+    everything on a page nobody has characterised is how a content selector
+    comes to be "verified" against whatever unrelated element happens to match.
+    """
+    return RELEVANT_CATEGORIES.get(page_type, _COMMON)
 
 
 def read_course_name(page, existing_config):
@@ -175,6 +181,49 @@ def _seed_findings(existing_config):
     return {
         category: dict(elements or {}) for category, elements in (existing_config or {}).items()
     }
+
+
+def _ranks_below(el_info, selector, effective):
+    """Reports whether ``selector`` sits below ``effective`` in the schema order.
+
+    ``_probe_element`` returns the first selector that is *visible right now*,
+    which is not the same as the best one. A transcript panel that is closed
+    hides the container while leaving the "Transcript" toggle on screen, so the
+    probe found the toggle and recorded it as the transcript body -- inverting
+    the preference order the schema declares and leaving every later scrape
+    reading the player's own control text instead of the transcript.
+    """
+    order = list(el_info.get("selectors") or [])
+    if selector not in order or effective not in order:
+        return False
+    return order.index(selector) > order.index(effective)
+
+
+def _split_selectors(entry):
+    """Splits one selector entry into its effective value and the rest.
+
+    An element may be recorded as a single selector or as a list in preference
+    order, of which only the first is ever used. Comparing a probe result
+    against the list itself is never equal, so a list-valued entry was reported
+    MODIFIED on every pass and rewritten even when nothing had changed.
+    """
+    if isinstance(entry, (list, tuple)):
+        values = [item for item in entry if isinstance(item, str)]
+        return (values[0] if values else ""), values[1:]
+    return (entry if isinstance(entry, str) else ""), []
+
+
+def _with_alternatives(selector, state_entry):
+    """Returns the entry to store, keeping any fallbacks already on file.
+
+    Storing the probe result as a bare string would collapse a list-valued
+    entry to its new head and drop the selectors kept behind it as fallbacks.
+    The superseded head itself is not kept: replacing it is what MODIFIED means,
+    and re-adding it on every pass would grow the entry without bound.
+    """
+    _, alternatives = _split_selectors(state_entry)
+    remaining = [value for value in alternatives if value != selector]
+    return [selector, *remaining] if remaining else selector
 
 
 def _print_banner(page, course, module, item, subtext, page_type):
@@ -256,8 +305,13 @@ def discover_selectors(page, state):
 
             # Compared against the effective value (state over packaged), so a
             # selector that merely restates a shipped default is not persisted.
-            old_value = (existing_config.get(category) or {}).get(el_name)
+            old_value, _ = _split_selectors((existing_config.get(category) or {}).get(el_name))
             if old_value == selector:
+                continue
+            # Matching lower down the shipped list is not an upgrade on a
+            # selector higher up; it only means the better element is off
+            # screen at this moment.
+            if _ranks_below(el_info, selector, old_value):
                 continue
             if old_value and old_value != "NOT_FOUND_YET":
                 label, detail = "MODIFIED", f"{el_name}: {old_value} -> {selector}"
@@ -271,7 +325,7 @@ def discover_selectors(page, state):
 
             if category in VERIFIABLE_CATEGORIES:
                 verify_scraping(page, selector, el_name)
-            known[el_name] = selector
+            known[el_name] = _with_alternatives(selector, known.get(el_name))
             pending_updates = True
 
     if pending_updates:
@@ -279,10 +333,16 @@ def discover_selectors(page, state):
     else:
         logs.ok("selectors are stable; no changes needed")
 
-    state.selectors = findings
+    # The merged view, not the learned state alone. ``findings`` is seeded from
+    # the state file so that saving it cannot bury the packaged defaults; giving
+    # the same narrow mapping back to the caller was a different bug with the
+    # same root. The next pass then read every shipped default as absent and
+    # relabelled it NEW, and the hop between items lost navigation.next_item --
+    # which no state file need ever have carried.
+    state.selectors = schema.verified_selectors()
     if sys.stdout.isatty():
         # Only worth holding the highlights on screen for someone watching them;
         # a scripted discovery pass paid the wait for nothing.
         logs.step("pausing for inspection (5s)")
         time.sleep(5)
-    return findings
+    return state.selectors

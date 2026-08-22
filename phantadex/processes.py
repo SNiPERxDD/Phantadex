@@ -75,26 +75,40 @@ def process_table():
     return rows
 
 
+def _runs_python(token):
+    """Reports whether a command's executable is a Python interpreter."""
+    name = os.path.basename(token.replace("\\", "/")).lower()
+    if name.endswith(".exe"):
+        name = name[: -len(".exe")]
+    return name == "py" or name.startswith("python")
+
+
 def is_phantadex_command(command):
     """Reports whether a command line is a Phantadex entry point.
 
-    Only the executable and any token that names a file are considered. A bare
-    word elsewhere on the line is an argument -- ``grep -rn pdex`` mentions the
-    entry point without being one, and killing the user's search would be worse
-    than missing a run.
+    The executable decides. A file named further along the line is consulted
+    only when that executable is a Python interpreter, because every other
+    program takes such a name as *data*: ``vim phantadex_watch.py`` and
+    ``git add phantadex_watch.py`` name an entry point without being one, and
+    killing the user's editor mid-edit is worse than missing a run. A bare word
+    is never enough either -- ``grep -rn pdex`` mentions the entry point without
+    being one.
     """
     tokens = (command or "").split()
     if not tokens:
         return False
-    for index, token in enumerate(tokens):
+    if os.path.basename(tokens[0].replace("\\", "/")) in ENTRY_POINT_NAMES:
+        return True
+    if not _runs_python(tokens[0]):
+        return False
+    for index, token in enumerate(tokens[1:], start=1):
         if token in {"-m", "--module"} and index + 1 < len(tokens):
             module = tokens[index + 1]
             if module == MODULE_PACKAGE or module.startswith(f"{MODULE_PACKAGE}."):
                 return True
         names_a_file = "/" in token or "\\" in token or token.endswith(".py")
-        if index == 0 or names_a_file:
-            if os.path.basename(token.replace("\\", "/")) in ENTRY_POINT_NAMES:
-                return True
+        if names_a_file and os.path.basename(token.replace("\\", "/")) in ENTRY_POINT_NAMES:
+            return True
     return False
 
 
@@ -153,6 +167,16 @@ def _windows_alive(pid):
     share a console. The Win32 handle is opened instead and its exit code read.
     """
     kernel32 = ctypes.windll.kernel32
+    # ctypes assumes a 32-bit signed return for an undeclared function. A HANDLE
+    # is pointer-wide, so a 64-bit handle with its high word set came back
+    # negative and sign-extended on the way into GetExitCodeProcess, which then
+    # rejected it -- reporting a process that had already exited as still alive,
+    # and leaving ``stop`` waiting out the grace period for nothing.
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    kernel32.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
+    kernel32.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+
     handle = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
     if not handle:
         # Refused rather than absent: the process exists, out of reach.

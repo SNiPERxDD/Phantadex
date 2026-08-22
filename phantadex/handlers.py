@@ -46,6 +46,10 @@ DIALOGUE_CONTROL_ATTEMPTS = 10
 # readings, so markup that has not rendered on the first check is not mistaken
 # for a finished attempt.
 QUIZ_ABSENT_CONFIRMATIONS = 2
+# How often the graded-quiz wait is polled, and how often it reminds the screen
+# that it is still waiting rather than hung.
+QUIZ_POLL_SECONDS = 2
+QUIZ_REMINDER_SECONDS = 60
 
 
 @dataclass
@@ -286,14 +290,26 @@ class QuizHandler(BaseHandler):
 
         start_url = page.url
         absent = 0
+        # Absence only means "finished" once the quiz has actually been seen.
+        # A graded quiz behind a start screen matches nothing, so counting
+        # absence from the first poll ended the pause after about four seconds
+        # -- announcing a wait for the user and then advancing without one.
+        seen = False
+        waited = 0
+        next_reminder = QUIZ_REMINDER_SECONDS
         while urls.same_item(page.url, start_url):
             if self._quiz_present(page):
+                seen = True
                 absent = 0
-            else:
+            elif seen:
                 absent += 1
                 if absent >= QUIZ_ABSENT_CONFIRMATIONS:
                     break
-            time.sleep(2)
+            time.sleep(QUIZ_POLL_SECONDS)
+            waited += QUIZ_POLL_SECONDS
+            if waited >= next_reminder:
+                logs.pending(f"still waiting on this quiz ({waited // 60}m)")
+                next_reminder += QUIZ_REMINDER_SECONDS
 
         if not urls.same_item(page.url, start_url):
             # The user navigated away themselves; nothing left to advance past.

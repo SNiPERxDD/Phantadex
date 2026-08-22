@@ -4,7 +4,7 @@ import unittest
 from unittest import mock
 
 from phantadex import config, detection, runner
-from tests.fakes import FakePage
+from tests.fakes import FakePage, capture_console
 
 
 class FakeManager:
@@ -261,3 +261,43 @@ class TickMutesBeforeAnyPromptTests(unittest.TestCase):
             watch._tick(page)
         silence.assert_called_once_with(page)
         skip.assert_called_once()
+
+
+class UnmappedCourseTests(unittest.TestCase):
+    """A run with no ledger has to say so, once."""
+
+    def setUp(self):
+        self.watch = runner.Runner(config.Settings())
+
+    def test_a_course_that_cannot_be_named_is_reported_once(self):
+        # _sync_course_map runs on every tick, so the notice has to be raised
+        # once per failure rather than once per poll. Before this it was not
+        # raised at all: nothing was archived and nothing said why.
+        page = FakePage(url="https://www.coursera.org/learn/demo/lecture/a/one")
+        with (
+            mock.patch.object(runner, "get_robust_course_name", return_value=""),
+            capture_console() as console,
+        ):
+            for _ in range(5):
+                self.assertFalse(self.watch._sync_course_map(page))
+
+        self.assertEqual(console.getvalue().lower().count("no ledger"), 1)
+
+    def test_a_lookup_that_raises_is_reported_too(self):
+        page = FakePage(url="https://www.coursera.org/learn/demo/lecture/a/one")
+        with (
+            mock.patch.object(runner, "get_robust_course_name", side_effect=RuntimeError("boom")),
+            capture_console() as console,
+        ):
+            self.assertFalse(self.watch._sync_course_map(page))
+        self.assertIn("no ledger", console.getvalue().lower())
+
+    def test_nothing_is_said_once_a_ledger_is_open(self):
+        page = FakePage(url="https://www.coursera.org/learn/demo/lecture/a/one")
+        self.watch.ctx.manager = mock.Mock()
+        with (
+            mock.patch.object(runner, "get_robust_course_name", return_value=""),
+            capture_console() as console,
+        ):
+            self.assertFalse(self.watch._sync_course_map(page))
+        self.assertNotIn("no ledger", console.getvalue().lower())

@@ -101,13 +101,14 @@ def auto_hop_smart(page, selectors, state):
         return False
 
     for item_type in missing:
-        if item_type in targets:
+        if item_type in targets and item_type not in state.attempted_types:
             url = targets[item_type]
+            state.attempted_types.add(item_type)
             logs.nav(f"{item_type} found in the sidebar; jumping to {url}")
             page.goto(urls.absolute_url(url))
             return True
 
-    logs.step(f"missing {missing}; no sidebar path, falling back to the Next button")
+    logs.step(f"missing {missing}; no unvisited sidebar path, trying the Next button")
     return auto_hop_next(page, selectors)
 
 
@@ -151,7 +152,15 @@ def _observe(browser_context, state):
         # take the user's focus away every two seconds.
         page = _course_tab(browser_context)
 
-        if page:
+        if page is None:
+            if last_url != WAITING:
+                logs.pending("waiting for a course tab")
+                last_url = WAITING
+            time.sleep(2)
+            continue
+
+        current_url = last_url
+        try:
             if not state.mapped:
                 logs.step("performing the initial course mapping")
                 get_sidebar_targets(page, state, force_print=True)
@@ -164,15 +173,31 @@ def _observe(browser_context, state):
                 last_url = current_url
 
                 if not auto_hop_smart(page, selectors, state):
-                    logs.ok("discovery objective achieved; closing the session")
+                    _report_close(state)
                     return
 
                 if state.required_types and not missing_types(state):
                     logs.ok("all identified course types verified; closing the session")
                     return
-        else:
-            if last_url != WAITING:
-                logs.pending("waiting for a course tab")
-                last_url = WAITING
+        except KeyboardInterrupt:
+            raise
+        except Exception as exc:
+            # One unreadable page -- a tab mid-navigation, a frame detached
+            # under the probe -- used to end the whole run. The pass is
+            # resumable by design, so the poll survives it and moves on.
+            logs.warn(f"skipping an item that could not be read: {exc}")
+            log.debug("Observation tick failed", exc_info=True)
+            # Treated as seen, so the poll does not retry the same failure
+            # every two seconds for the rest of the session.
+            last_url = current_url
 
         time.sleep(2)
+
+
+def _report_close(state):
+    """Says why the run is stopping, naming any type left unverified."""
+    remaining = missing_types(state)
+    if remaining:
+        logs.warn(f"no route left to {remaining}; closing the session")
+    else:
+        logs.ok("discovery objective achieved; closing the session")

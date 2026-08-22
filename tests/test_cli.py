@@ -3,6 +3,7 @@
 import importlib
 import importlib.util
 import io
+import re
 import subprocess
 import sys
 import unittest
@@ -10,6 +11,7 @@ from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
+import phantadex
 from phantadex import cli, config, course_manager, handlers, overview
 from tests.fakes import capture_console
 
@@ -359,8 +361,18 @@ class HelpPageTests(unittest.TestCase):
     def test_every_dispatchable_command_is_described(self):
         self.assertEqual(set(cli.COMMANDS), set(overview.COMMAND_SUMMARIES))
 
+    @staticmethod
+    def _unwrapped():
+        """Returns the page with its column wrapping flattened back out.
+
+        The second column is wrapped to the page width, so a summary need not
+        appear as one contiguous run of text. Collapsing the whitespace keeps
+        these checks about whether the text is present at all.
+        """
+        return " ".join(overview.render().split())
+
     def test_every_command_appears_on_the_page(self):
-        page = overview.render()
+        page = self._unwrapped()
         for command in cli.COMMANDS:
             self.assertIn(command, page, command)
             self.assertIn(overview.COMMAND_SUMMARIES[command], page, command)
@@ -370,7 +382,7 @@ class HelpPageTests(unittest.TestCase):
             self.assertTrue(handler.summary.strip(), page_type)
 
     def test_every_handled_item_type_appears_on_the_page(self):
-        page = overview.render()
+        page = self._unwrapped()
         for page_type, handler in handlers.HANDLERS.items():
             self.assertIn(page_type.lower(), page, page_type)
             self.assertIn(handler.summary, page, page_type)
@@ -386,6 +398,36 @@ class HelpPageTests(unittest.TestCase):
         page = overview.render()
         self.assertIn("PHANTADEX_STATE_DIR", page)
         self.assertNotIn(str(Path.home()), page)
+
+    def test_the_page_prints_only_ascii(self):
+        # -h is printed before logging widens stdout to UTF-8, and a redirected
+        # stream on Windows inherits the ANSI code page. A single box-drawing
+        # rule would raise UnicodeEncodeError on the first line of help.
+        self.assertTrue(overview.render().isascii())
+
+    def test_no_line_runs_past_eighty_columns(self):
+        for line in overview.render().splitlines():
+            self.assertLessEqual(len(line), overview.MAX_PAGE_WIDTH, line)
+
+    def test_every_rule_spans_the_section_under_it(self):
+        # A rule shorter than the lines beneath it reads as a broken table.
+        lines = overview.render().splitlines()
+        rules = [line for line in lines if set(line) in ({"-"}, {"="})]
+        self.assertTrue(rules)
+        widest = max(len(line) for line in lines)
+        for rule in rules:
+            self.assertEqual(len(rule), widest)
+
+    def test_the_page_names_where_the_project_lives(self):
+        self.assertIn(phantadex.REPOSITORY_URL, overview.render())
+
+    def test_the_repository_link_matches_the_published_metadata(self):
+        # Two places name the project's home; only one of them is what pip and
+        # PyPI show. They are kept identical rather than left to drift.
+        pyproject = (Path(__file__).resolve().parent.parent / "pyproject.toml").read_text()
+        homepage = re.search(r'Homepage = "([^"]+)"', pyproject)
+        self.assertIsNotNone(homepage)
+        self.assertEqual(homepage.group(1), phantadex.REPOSITORY_URL)
 
     def test_usage_lines_follow_the_name_the_tool_was_called_by(self):
         for name in ("pdex", "phantadex"):

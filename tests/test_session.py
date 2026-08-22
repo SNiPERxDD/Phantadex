@@ -112,5 +112,33 @@ class CourseTabTests(unittest.TestCase):
         self.assertNotIn("course tabs are open", console.getvalue())
 
 
+class AttachFailureDiagnosisTests(unittest.TestCase):
+    """The message shown when Chrome cannot be attached to."""
+
+    def _diagnose(self, cdp_url, detail):
+        return session.BrowserSession(cdp_url)._diagnose(RuntimeError(detail))
+
+    def test_a_refused_connection_names_the_launcher_that_ships(self):
+        # `scripts/` is not in the wheel, so an index install has no such path.
+        message = self._diagnose(config.CDP_URL, "connect ECONNREFUSED 127.0.0.1:9222")
+        self.assertIn("pdex chrome", message)
+        self.assertNotIn("scripts/", message)
+
+    def test_the_port_check_follows_the_endpoint_that_was_configured(self):
+        # A hard-coded 9222 sends the user to look at a port they are not using.
+        message = self._diagnose(
+            "http://127.0.0.1:9333", "Browser context management is not supported"
+        )
+        self.assertIn("9333", message)
+        self.assertNotIn("9222", message)
+
+    def test_the_port_check_uses_a_command_the_platform_has(self):
+        attached = session.BrowserSession("http://127.0.0.1:9333")
+        with mock.patch.object(session.os, "name", "nt"):
+            self.assertIn("netstat", attached._port_check_hint())
+        with mock.patch.object(session.os, "name", "posix"):
+            self.assertIn("lsof", attached._port_check_hint())
+
+
 if __name__ == "__main__":
     unittest.main()

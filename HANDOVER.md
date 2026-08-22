@@ -22,6 +22,12 @@
   one-liner fails `tests/test_cli.py`. Do not hand-write item descriptions into
   the page. The page must not print the expanded state directory: it names
   `PHANTADEX_STATE_DIR` instead, and a test asserts the home path never appears.
+  The page is ASCII only: it prints before `logs.console_stream()` widens stdout
+  to UTF-8, so a box-drawing rule would raise `UnicodeEncodeError` on a
+  redirected Windows run. Section rules are laid down as markers and sized once
+  the page is built, and no line runs past `overview.MAX_PAGE_WIDTH`. The
+  repository link comes from `phantadex.REPOSITORY_URL` and is checked against
+  the `Homepage` in `pyproject.toml`, so help and published metadata cannot drift.
 - `config.program_name(subcommand)` decides the `prog=` of every parser. Left to
   argparse, each subcommand's usage line read as the bare entry point, so none of
   them could be copied and run. A name that is not one of the two console entry
@@ -40,7 +46,13 @@
   from an older build or a compatibility script is found too. Note that
   `os.kill(pid, 0)` is not a liveness probe on Windows -- signal 0 is
   `CTRL_C_EVENT` and interrupts the caller's own console group; the Win32
-  handle is read instead.
+  handle is read instead, with `restype`/`argtypes` declared, because ctypes
+  otherwise truncates a pointer-wide HANDLE to a signed 32-bit integer.
+  `is_phantadex_command` consults a file named on the line only when the
+  executable is a Python interpreter. Without that gate `vim phantadex_watch.py`
+  and `git commit phantadex_watch.py` were killed alongside the runs. Real ps
+  output for an installed run is `<python> <bin>/pdex watch ...`, so both the
+  interpreter branch and the bare-entry-point branch have to stay.
 - Observable delays are drawn from `phantadex/jitter.py`, a log-normal over the
   requested span with a 4% chance of a longer pause, rather than a uniform
   draw. Its mean matches the uniform draw it replaced, so run pace is
@@ -90,7 +102,9 @@
 - Archive rows are compact, course-map generation has a TTY-only spinner, and
   Dex uses the same Phantadex status theme instead of fixed-width box art.
 - Transcript fallback recognizes the current Files panel, prefers its TXT
-  asset, and does not toggle an already-open panel closed.
+  asset, and does not toggle an already-open panel closed. The downloaded file
+  is deleted after it is read: Playwright clears downloads when the context
+  closes, and this context is the user's own Chrome, which does not close.
 - Course archive mutations are serialized across processes and the XML ledger
   is replaced atomically on macOS/Linux and Windows.
 - Packaged `phantadex/config.yaml` holds immutable selector defaults; selectors
@@ -131,12 +145,42 @@
 - Element lookups scan candidates in the order `schema.selectors_for` declares
   rather than through one comma-joined locator, which was matched in DOM order
   and let a generic fallback outrank a verified selector.
-- A cleared graded quiz is advanced past after two consecutive absent readings;
-  an unreadable ledger is renamed to `<name>.corrupt-<timestamp>` instead of
+- A cleared graded quiz is advanced past after two consecutive absent readings,
+  but only once the quiz markup has been seen at least once. A graded quiz sits
+  behind a start screen where its markup is absent *before* the attempt as well
+  as after one, so counting absence from the first poll ended the `--pause-on-graded`
+  wait after about four seconds. Unseen, the wait now runs until the item is
+  left, which is what `AssignmentHandler` has always done; do not bound it.
+- An unreadable ledger is renamed to `<name>.corrupt-<timestamp>` instead of
   being rebuilt over; skipped discussions are archived; and an item that fails
   repeatedly and cannot be advanced past keeps its failure count.
 - Selector discovery is seeded from the learned state alone, so a probe that
-  merely restates a packaged default is not frozen into the state file.
+  merely restates a packaged default is not frozen into the state file. What it
+  *returns*, though, is the merged view (`schema.verified_selectors()`): handing
+  the seed back made every packaged default read as absent on the next item, so
+  they were relabelled NEW and written out, and the hop lost
+  `navigation.next_item`.
+- `_probe_element` returns the first selector that is *visible*, which is not
+  the same as the best one. A probe result ranking below the effective selector
+  in the element's own candidate list is discarded (`probing._ranks_below`).
+  Without that guard a closed transcript panel promoted the "Transcript" toggle
+  over `.rc-Transcript`, and every later scrape read the player's control text.
+- A state entry may be a string or a list in preference order, of which only the
+  head is used. Compare through `probing._split_selectors` -- comparing against
+  the list object is never equal, which reported MODIFIED on every pass -- and
+  write through `_with_alternatives`, which keeps the fallbacks behind the head.
+- A page type with no `RELEVANT_CATEGORIES` entry (WRAPUP, SURVEY, FILLER,
+  UNKNOWN) scans only the common categories, not the whole schema. Scanning
+  everything is how a content selector gets "verified" against an unrelated
+  element, and a verified selector outranks the shipped default until the next run.
+- The discovery loop jumps to each missing type once (`ObservationState.attempted_types`).
+  A row's mapped type and the type its page reports need not agree, so a visited
+  target can stay on the missing list; without the guard the loop re-issued the
+  same `goto`, the URL-change check never fired again, and the poll span in
+  silence. One unreadable item is reported and skipped rather than ending the run.
+- `runner._warn_unmapped` says once per failure that a run has no ledger. A
+  missing manager archives nothing and disables the navigation fallback, which
+  used to be indistinguishable from a course with nothing to save.
 - Every in-video interrupt rule (Reflect, Poll, Question) is confined to
   `modals.IN_VIDEO_SCOPE` -- the dialog roles plus the player's `rc-VideoQuiz`
   container -- and no longer falls back to the page. Only the two full-page
@@ -153,9 +197,9 @@
 - The seek script no longer dispatches a `timeupdate`. Assigning `currentTime`
   makes the browser fire seeking, seeked and timeupdate itself; the dispatched
   copy was redundant and was the only script-made event in the package.
-- Commits: `7d1012e` (package split) and `3b46a37` (archive, selector, and
-  traversal defects). The review fixes above are uncommitted at the time of
-  writing; nothing has been pushed.
+- Branch history is a sequence of themed commits on
+  `refactor/package-boundaries-and-schema`; no pull request has been opened
+  against `main` yet.
 
 - Coursera's AI roleplay practice (`/coach/`, row subtext "Dialogue") has its
   own `DIALOGUE` type and `DialogueHandler`. It is deliberately *not* folded in
@@ -232,7 +276,8 @@ course mapping and selector-discovery orchestration.
 - Windows was not available locally. The Windows `msvcrt` lock branch has a
   direct unit test; Python 3.11 syntax, shell-independent launcher invocation,
   and platform-neutral paths cover the remaining changed surface.
-- Latest gate: 349 offline tests pass; `ruff check phantadex tests` is clean
+- Latest gate: 507 offline tests pass in under a second; `ruff check .` and
+  `ruff format --check .` are both clean
 - Packaging: the launcher moved from `scripts/start_chrome_debug.py` into
   `phantadex/chrome.py` (`pdex chrome`) because `scripts/` is not in the wheel,
   so an index install had no way to start the debug browser; the script path

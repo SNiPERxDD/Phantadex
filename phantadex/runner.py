@@ -52,6 +52,9 @@ class Runner:
         self.stuck_ticks = 0
         self.handler_failures = {}
         self.unhandled_ticks = {}
+        # ``_sync_course_map`` runs on every tick, so the notice that no ledger
+        # could be opened has to be raised once rather than each time round.
+        self.warned_unmapped = False
 
     HANDLER_FAILURE_LIMIT = 3
     # Passes an unclassified page is given before the run steps past it.
@@ -247,9 +250,13 @@ class Runner:
             course_key = urls.course_slug(page.url) or course
         except Exception as exc:
             log.debug("Course name lookup failed: %s", exc)
+            self._warn_unmapped("the course name could not be read")
             return False
 
-        if not course or len(course) <= 3 or course_key == self.last_course_key:
+        if course_key == self.last_course_key:
+            return False
+        if not course or len(course) <= 3:
+            self._warn_unmapped(f"the course name read as {course!r}")
             return False
 
         logs.banner(course)
@@ -258,16 +265,31 @@ class Runner:
                 course_map = get_detailed_course_map(page)
         except Exception as exc:
             log.warning("Course map generation failed: %s", exc)
+            self._warn_unmapped(f"the course map could not be built ({exc})")
             return False
 
         if not course_map:
-            logs.warn("Course map came back empty; navigation fallbacks disabled.")
+            self._warn_unmapped("the course map came back empty")
             return False
 
         self.ctx.manager = CourseManager(course_map, course, root_dir=self.settings.transcript_dir)
         self.last_course_key = course_key
+        self.warned_unmapped = False
         logs.step(f"map loaded · ledger {self.ctx.manager.xml_path}")
         return True
+
+    def _warn_unmapped(self, reason):
+        """Reports once that the run is proceeding without a ledger.
+
+        Without a manager nothing is archived and no navigation fallback works,
+        which used to look identical to a course that simply had nothing to
+        save. Said once per failure, not once per tick.
+        """
+        if self.ctx.manager is not None or self.warned_unmapped:
+            return
+        self.warned_unmapped = True
+        logs.warn(f"No ledger for this course: {reason}.")
+        logs.step("items are still played, but nothing is archived this run")
 
     def _resume_at_first_incomplete(self, page):
         """Jumps straight to the first item the sidebar does not mark complete.

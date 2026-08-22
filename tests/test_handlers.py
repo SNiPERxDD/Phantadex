@@ -120,16 +120,38 @@ class HandlerBehaviourTests(unittest.TestCase):
         self.advance.assert_called_once()
         self.assertEqual(result, handlers.CONTINUE)
 
-    def test_a_graded_quiz_waits_when_the_pause_is_requested(self):
+    def test_a_graded_quiz_waits_until_the_item_is_left(self):
+        # Quiz markup that never matches is not evidence the attempt is over:
+        # a graded quiz sits behind a start screen. Absence used to end the
+        # pause on the second poll, so --pause-on-graded announced a wait and
+        # advanced about four seconds later. The wait now ends on navigation,
+        # which is what AssignmentHandler has always done.
         self.ctx.settings = config.Settings(pause_on_graded=True)
         with (
             mock.patch.object(handlers.detection, "is_graded", return_value=True),
             mock.patch.object(handlers.QuizHandler, "_quiz_present", return_value=False),
             mock.patch.object(handlers, "_notify"),
+            mock.patch.object(handlers.urls, "same_item", side_effect=[True, True, False, False]),
             mock.patch.object(handlers.time, "sleep"),
         ):
             result = handlers.QuizHandler().handle(self.page, self.ctx)
         self.assertEqual(self.ctx.manager.saved, [])
+        self.advance.assert_not_called()
+        self.assertEqual(result, handlers.CONTINUE)
+
+    def test_a_graded_quiz_resumes_once_the_attempt_is_gone(self):
+        # Markup seen and then absent for the confirmation count is a finished
+        # attempt on the same URL, so the run advances itself.
+        self.ctx.settings = config.Settings(pause_on_graded=True)
+        with (
+            mock.patch.object(handlers.detection, "is_graded", return_value=True),
+            mock.patch.object(
+                handlers.QuizHandler, "_quiz_present", side_effect=[True, False, False]
+            ),
+            mock.patch.object(handlers, "_notify"),
+            mock.patch.object(handlers.time, "sleep"),
+        ):
+            result = handlers.QuizHandler().handle(self.page, self.ctx)
         self.advance.assert_called_once()
         self.assertEqual(result, handlers.CONTINUE)
 

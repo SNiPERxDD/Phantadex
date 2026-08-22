@@ -334,9 +334,30 @@ class QuizHandoffTests(unittest.TestCase):
         advance.assert_called_once()
 
     def test_absence_is_confirmed_before_the_quiz_counts_as_cleared(self):
-        page = self._ClearingPage(clears_after=0, url=ITEM_A.replace("/lecture/", "/quiz/"))
+        page = self._ClearingPage(clears_after=1, url=ITEM_A.replace("/lecture/", "/quiz/"))
         self._handle(page)
         self.assertGreaterEqual(page.checks, handlers.QUIZ_ABSENT_CONFIRMATIONS)
+
+    def test_markup_that_never_rendered_does_not_end_the_pause(self):
+        # A graded quiz sits behind a start screen, so its markup is absent
+        # before the attempt as well as after one. Counting absence from the
+        # first poll ended --pause-on-graded about four seconds after it
+        # announced a wait. Only absence *after* the quiz was actually seen
+        # means the attempt is over; otherwise the wait runs until the user
+        # leaves the item.
+        page = self._ClearingPage(clears_after=0, url=ITEM_A.replace("/lecture/", "/quiz/"))
+        original_locator = page.locator
+
+        def _navigate_after_several_checks(selector, has_text=None):
+            if page.checks > handlers.QUIZ_ABSENT_CONFIRMATIONS + 2:
+                page.url = ITEM_B
+            return original_locator(selector, has_text)
+
+        page.locator = _navigate_after_several_checks
+        outcome, advance = self._handle(page)
+        self.assertGreater(page.checks, handlers.QUIZ_ABSENT_CONFIRMATIONS)
+        advance.assert_not_called()
+        self.assertEqual(outcome, handlers.CONTINUE)
 
     def test_a_user_navigating_away_is_not_advanced_again(self):
         page = self._ClearingPage(url=ITEM_A.replace("/lecture/", "/quiz/"))

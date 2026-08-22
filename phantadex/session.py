@@ -1,6 +1,7 @@
 """Chrome DevTools Protocol attachment and course-tab management."""
 
 import os
+from urllib.parse import urlparse
 
 from playwright.sync_api import sync_playwright
 
@@ -98,6 +99,18 @@ class BrowserSession:
             self.browser = None
             self.context = None
 
+    def _port_check_hint(self):
+        """Returns the command that names what holds the debug port.
+
+        The port is read from the configured endpoint rather than assumed, and
+        the command is the one the host platform actually ships: ``lsof`` is not
+        present on Windows.
+        """
+        port = urlparse(self.cdp_url).port or 9222
+        if os.name == "nt":
+            return f"netstat -ano | findstr :{port}"
+        return f"lsof -nP -iTCP:{port} -sTCP:LISTEN"
+
     def _diagnose(self, exc):
         """Turns an opaque CDP failure into an actionable message."""
         detail = str(exc)
@@ -106,16 +119,12 @@ class BrowserSession:
                 f"{self.cdp_url} answered, but refused browser-level control. "
                 "Usually the debug port is held by something other than a full Chrome "
                 "target (a relay, extension bridge, or another automation tool), or the "
-                "Chrome that owns it is mid-restart. Check with "
-                "`lsof -nP -iTCP:9222 -sTCP:LISTEN`; if it is not Chrome, close it and "
-                "relaunch with `python3 scripts/start_chrome_debug.py`. If it is Chrome, "
-                "retry once -- this can be transient."
+                f"Chrome that owns it is mid-restart. Check with `{self._port_check_hint()}`; "
+                "if it is not Chrome, close it and relaunch with `pdex chrome`. If it is "
+                "Chrome, retry once -- this can be transient."
             )
         if "ECONNREFUSED" in detail or "connect ECONNREFUSED" in detail:
-            return (
-                f"Nothing is listening on {self.cdp_url}. Start Chrome with "
-                "`python3 scripts/start_chrome_debug.py` first."
-            )
+            return f"Nothing is listening on {self.cdp_url}. Start Chrome with `pdex chrome` first."
         return f"Could not attach to Chrome at {self.cdp_url}: {detail}"
 
     def find_course_page(self, course_url=""):

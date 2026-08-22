@@ -12,9 +12,17 @@ from tests.fakes import FakeLocator, FakePage
 class FakeDownload:
     def __init__(self, path):
         self._path = path
+        self.deleted = 0
 
     def path(self):
         return self._path
+
+    def delete(self):
+        self.deleted += 1
+        try:
+            os.unlink(self._path)
+        except FileNotFoundError:
+            pass
 
 
 class FakeDownloadContext:
@@ -62,7 +70,9 @@ class TranscriptDownloadTests(unittest.TestCase):
         self.page = FakePage(url="/learn/c/lecture/aaa/one")
         handle, self.tmp = tempfile.mkstemp(suffix=".txt")
         os.close(handle)
-        self.addCleanup(os.unlink, self.tmp)
+        # The extraction now discards the file itself, so cleanup has to
+        # tolerate it already being gone.
+        self.addCleanup(lambda: os.path.exists(self.tmp) and os.unlink(self.tmp))
 
     def _with_link(self, link):
         self.page.locators = {
@@ -91,6 +101,48 @@ class TranscriptDownloadTests(unittest.TestCase):
                 page_ops._transcript_from_download(self.page), "Downloaded transcript body."
             )
         self.assertEqual(tab.clicked, 1)
+
+    def test_the_downloaded_file_is_discarded_after_it_is_read(self):
+        # Playwright clears a download when its context closes, and this context
+        # is the user's own Chrome, which does not close. Left alone, a bulk
+        # archive leaves one temporary file per transcript behind.
+        with open(self.tmp, "w", encoding="utf-8") as handle:
+            handle.write("Downloaded transcript body.")
+        tab = FakeLocator(count=1)
+        link = FakeLocator(count=1)
+        download = FakeDownload(self.tmp)
+        self.page.expect_download = lambda **_kw: FakeDownloadContext(download)
+        with (
+            mock.patch.object(page_ops.schema, "first_visible", return_value=tab),
+            mock.patch.object(
+                page_ops, "_first_visible_transcript_download", side_effect=[None, link]
+            ),
+            mock.patch.object(page_ops.time, "sleep"),
+        ):
+            page_ops._transcript_from_download(self.page)
+        self.assertEqual(download.deleted, 1)
+        self.assertFalse(os.path.exists(self.tmp))
+
+    def test_a_download_that_cannot_be_discarded_is_still_returned(self):
+        # The browser may have gone by the time the file is cleaned up. The
+        # transcript is already in hand, so that must not lose it.
+        with open(self.tmp, "w", encoding="utf-8") as handle:
+            handle.write("Downloaded transcript body.")
+        tab = FakeLocator(count=1)
+        link = FakeLocator(count=1)
+        download = FakeDownload(self.tmp)
+        download.delete = mock.Mock(side_effect=RuntimeError("target closed"))
+        self.page.expect_download = lambda **_kw: FakeDownloadContext(download)
+        with (
+            mock.patch.object(page_ops.schema, "first_visible", return_value=tab),
+            mock.patch.object(
+                page_ops, "_first_visible_transcript_download", side_effect=[None, link]
+            ),
+            mock.patch.object(page_ops.time, "sleep"),
+        ):
+            self.assertEqual(
+                page_ops._transcript_from_download(self.page), "Downloaded transcript body."
+            )
 
     def test_files_and_transcript_clicks_move_the_pointer_first(self):
         with open(self.tmp, "w", encoding="utf-8") as handle:
