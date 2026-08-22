@@ -34,24 +34,10 @@ Product vocabulary:
 4.  **Content Archival:** Extracts transcripts and reading materials, normalises the
     text (see §5), and versions a file when its content has genuinely changed.
 5.  **Item Handling:** One handler per content type, dispatched from
-    `detection.classify(page)`:
-    *   **Video:** Watches to the configured completion threshold, or to the
-        player's own `ended` event. The whole video plays unless `--skip` is
-        passed.
-    *   **Reading:** Dwells for the item's listed duration while scrolling the
-        content pane, then marks complete.
-    *   **Discussion:** Archives the prompt and advances. No reply is composed
-        or submitted.
-    *   **Ungraded Plugin / Lab:** Stepped over. The map names the two apart --
-        an embedded widget or external tool is an `UNGRADED_PLUGIN`, an ungraded
-        lab is a `LAB` -- because Coursera's own row subtext does; both reach the
-        same handler.
-    *   **Dialogue:** Coursera's AI roleplay practice. Opened, then closed and
-        the closing confirmed, which is what marks the item complete. The
-        conversation itself is not held up or archived.
-    *   **Graded work:** Detected, named in the log and stepped past, so one
-        graded item cannot stall the whole run. `--pause-on-graded` waits for
-        you instead (see §8).
+    `detection.classify(page)`. Videos play to a completion threshold, readings
+    dwell while the pane scrolls, and everything that cannot be completed by
+    watching or reading is stepped past. The flags that change this are in §5,
+    the per-type constraints in §8, and `pdex -h` prints the current set.
 6.  **Pointer Consistency:** Automated controls share one interaction path that
     moves through several cursor steps, hovers, pauses for a randomized reaction
     interval, and then clicks.
@@ -403,6 +389,13 @@ python run_tests.py --live   # additionally probe a running Chrome session
     it waits until the user completes or leaves the item.
 *   **Discussion Prompts:** The prompt is archived; no reply is composed or
     submitted.
+*   **Dialogue:** Coursera's AI roleplay practice is opened, then closed and the
+    closing confirmed, which is what marks the item complete. The conversation
+    itself is neither held up nor archived.
+*   **Ungraded Plugin / Lab:** Both are stepped over by one handler. The map
+    names them apart -- an embedded widget or external tool is an
+    `UNGRADED_PLUGIN`, an ungraded lab is a `LAB` -- because Coursera's own row
+    subtext does.
 *   **Source Site Updates:** The script relies on CSS selectors. If Coursera
     changes its markup these break; `pdex discover` is the repair path (§5).
 *   **Transcript Downloads:** The fallback supports Coursera's current Files
