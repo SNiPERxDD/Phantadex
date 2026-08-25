@@ -141,6 +141,7 @@ class FakePage:
         locators=None,
         evaluate_result=None,
         evaluate_error=None,
+        wait_error=None,
     ):
         self._url = url
         self._title = title
@@ -148,6 +149,8 @@ class FakePage:
         self.evaluate_result = evaluate_result
         self.evaluate_error = evaluate_error
         self.evaluated = []
+        self.wait_error = wait_error
+        self.waited_for = []
         self.goto_calls = []
         self.reloaded = 0
         self.pointer_events = []
@@ -170,6 +173,13 @@ class FakePage:
         if key in self.locators:
             return self.locators[key]
         return FakeLocator(count=0)
+
+    def wait_for_selector(self, selector, **kwargs):
+        """Records a wait and answers it from the same table ``locator`` reads."""
+        self.waited_for.append((selector, kwargs))
+        if self.wait_error is not None:
+            raise self.wait_error
+        return self.locator(selector)
 
     def goto(self, url, **_kwargs):
         self.goto_calls.append(url)

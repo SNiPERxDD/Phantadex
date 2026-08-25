@@ -27,8 +27,8 @@ only what still constrains the code.
   not `scripts/`, which is not in the wheel -- an index install otherwise had no
   way to start the debug browser. `scripts/start_chrome_debug.py` stays as a
   wrapper. `.github/workflows/release.yml` publishes on a `v*` tag through PyPI
-  trusted publishing; the publisher is registered, `2.1.0` is the current
-  release on PyPI and the packaged version is `2.2.0`, not yet tagged. A
+  trusted publishing; the publisher is registered, and `2.3.0` is the current
+  release on PyPI. A
   release is a version bump in `phantadex/__init__.py` and a
   matching `vX.Y.Z` tag -- `pyproject.toml` reads the version from that
   attribute, so there is one place to change. The workflow refuses a tag that
@@ -400,7 +400,7 @@ ruff check . && ruff format --check .
 ## Verification boundary
 
 - Offline tests, `ruff` and CLI help run without a browser or network. Current
-  gate: 771 tests pass in about a second, `ruff check .` and
+  gate: 795 tests pass in about a second, `ruff check .` and
   `ruff format --check .` both clean.
 - Live CDP work is verified against a real signed-in Chrome: course mapping and
   Dex row states, Watch archiving transcripts and pacing to its completion

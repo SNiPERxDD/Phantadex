@@ -163,9 +163,9 @@ class AttachFailureDiagnosisTests(unittest.TestCase):
 
     def test_the_port_check_uses_a_command_the_platform_has(self):
         attached = session.BrowserSession("http://127.0.0.1:9333")
-        with mock.patch.object(session.os, "name", "nt"):
+        with mock.patch.object(session.chrome.os, "name", "nt"):
             self.assertIn("netstat", attached._port_check_hint())
-        with mock.patch.object(session.os, "name", "posix"):
+        with mock.patch.object(session.chrome.os, "name", "posix"):
             self.assertIn("lsof", attached._port_check_hint())
 
 

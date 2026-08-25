@@ -1,4 +1,4 @@
-"""Regressions for the defects found in the package-boundaries reviews.
+"""Regressions for defects found in the package-boundaries reviews and in the field.
 
 Each case pins behaviour that was previously wrong in a way no existing test
 caught, so a future change cannot quietly reintroduce it.
@@ -1391,3 +1391,76 @@ class SilenceIsNotADriftedSelectorTests(unittest.TestCase):
         result, reported = self._extract(object())
         self.assertEqual(result, (None, "FAILED"))
         reported.assert_called_once_with("the video transcript")
+
+
+class _LateHeaderPage(FakePage):
+    """A page that renders its course header only after something waits for it.
+
+    Models what the platform actually does: the URL changes first and the view
+    underneath it is swapped in afterwards, so a read taken in between sees the
+    previous screen.
+    """
+
+    def __init__(self, header):
+        super().__init__(url=ITEM_A)
+        self._header = header
+
+    def wait_for_selector(self, selector, **kwargs):
+        self.waited_for.append((selector, kwargs))
+        self.locators["a[title*='Home Page']"] = self._header
+        return self._header
+
+
+class TheCourseIdentityIsWaitedForNotSampledTests(unittest.TestCase):
+    """A read taken mid-render must not be mistaken for a course without a name.
+
+    Observed on a slower machine: the run attached, read the header 50ms later
+    while the previous screen was still up, and got nothing. That opened no
+    ledger and built no map, so the whole run played its items and archived
+    none of them -- behind one warning, and with no second chance until the
+    next tick.
+    """
+
+    def test_a_header_that_arrives_late_is_still_read(self):
+        page = _LateHeaderPage(FakeLocator(count=1, text="Digital Marketing Implementation"))
+
+        self.assertEqual(context.get_robust_course_name(page), "Digital Marketing Implementation")
+
+    def test_the_wait_covers_every_selector_the_read_will_try(self):
+        # Waiting on a subset lets the read start while the selector that would
+        # have answered is still absent, which is the same bug one step later.
+        page = _LateHeaderPage(FakeLocator(count=1, text="Course"))
+        context.get_robust_course_name(page)
+
+        waited = page.waited_for[0][0]
+        for selector in context.COURSE_HEADER_SELECTORS:
+            self.assertIn(selector, waited)
+
+    def test_a_page_that_never_renders_a_header_still_answers(self):
+        # The wait is best-effort: a page genuinely without a course header
+        # must return None rather than raise out of the tick loop.
+        page = FakePage(url=ITEM_A, wait_error=RuntimeError("timeout 8000ms exceeded"))
+
+        self.assertIsNone(context.get_robust_course_name(page))
+
+    def test_the_wait_is_paid_per_navigation_not_per_tick(self):
+        """A course whose header selectors have drifted must not stall the loop.
+
+        ``_sync_course_map`` runs every tick. Waiting the full timeout out on
+        each of them costs eight seconds a pass, indefinitely, behind the single
+        warning the run already raised -- the loop cadence collapses with nothing
+        on screen to say why.
+        """
+        page = FakePage(url=ITEM_A)
+        watch = runner.Runner(config.Settings())
+        with mock.patch.object(runner, "get_robust_course_name", return_value=None) as read:
+            watch._sync_course_map(page)
+            watch._sync_course_map(page)
+            page.url = ITEM_B
+            watch._sync_course_map(page)
+
+        waits = [call.kwargs["timeout_ms"] for call in read.call_args_list]
+        self.assertEqual(
+            waits,
+            [runner.COURSE_HEADER_TIMEOUT_MS, 0, runner.COURSE_HEADER_TIMEOUT_MS],
+        )

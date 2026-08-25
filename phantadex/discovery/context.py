@@ -13,6 +13,16 @@ log = logs.get_logger("discovery.context")
 
 UNKNOWN_MODULE = "Unknown Module"
 
+# Where the course title is rendered, most specific first. Held here rather
+# than inline so the wait and the read cannot drift apart.
+COURSE_HEADER_SELECTORS = (
+    "a[title*='Home Page']",
+    "a.cds-150",
+    "a.cds-341.css-yrq2q5",
+    "nav[aria-label='Breadcrumbs'] li:first-child",
+)
+COURSE_HEADER_TIMEOUT_MS = 8000
+
 # Walks up from the active sidebar link to the nearest heading above it. Used
 # only when the cached map and the breadcrumbs both come up empty.
 _NEAREST_HEADING_JS = """(el) => {
@@ -139,15 +149,35 @@ def get_page_metadata(page, course_map=None):
     return UNKNOWN_MODULE, page.title().split("|")[0].strip(), ""
 
 
-def get_robust_course_name(page):
-    """Tries various selectors to find the Course Name."""
-    selectors = [
-        "a[title*='Home Page']",
-        "a.cds-150",
-        "a.cds-341.css-yrq2q5",
-        "nav[aria-label='Breadcrumbs'] li:first-child",
-    ]
-    for sel in selectors:
+def _wait_for_course_header(page, timeout_ms):
+    """Waits until one of the course-title selectors is attached, or gives up.
+
+    Failure is not reported to the caller: the read that follows is the
+    authority on whether a name is there, and a header that appears between
+    the timeout and the read is still a header.
+    """
+    if timeout_ms <= 0:
+        return
+    try:
+        page.wait_for_selector(
+            ", ".join(COURSE_HEADER_SELECTORS), state="attached", timeout=timeout_ms
+        )
+    except Exception as exc:
+        log.debug("Course header did not appear within %dms: %s", timeout_ms, exc)
+
+
+def get_robust_course_name(page, timeout_ms=COURSE_HEADER_TIMEOUT_MS):
+    """Returns the course title read from the page header, or ``None``.
+
+    The header is waited for rather than sampled. The platform swaps the URL
+    before it finishes rendering the page underneath it, and a read taken in
+    that gap comes back empty -- which opened no ledger, built no map, and let
+    a whole run play items and archive none of them behind a single warning.
+    Once the header is up the wait costs nothing, so the tick loop pays only on
+    the pages that would have failed.
+    """
+    _wait_for_course_header(page, timeout_ms)
+    for sel in COURSE_HEADER_SELECTORS:
         try:
             loc = page.locator(sel).first
             if loc.count() > 0:

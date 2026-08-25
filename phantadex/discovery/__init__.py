@@ -12,7 +12,7 @@ The names re-exported here are the package's public surface; everything else is
 internal to the module that owns it.
 """
 
-from .context import get_page_metadata, get_robust_course_name
+from .context import COURSE_HEADER_TIMEOUT_MS, get_page_metadata, get_robust_course_name
 from .course_map import (
     expand_sidebar,
     get_completion_status,
@@ -30,6 +30,7 @@ from .rules import apply_filler_override, classify_sidebar_row, detect_page_type
 from .state import ObservationState
 
 __all__ = [
+    "COURSE_HEADER_TIMEOUT_MS",
     "ObservationState",
     "apply_filler_override",
     "auto_hop_next",

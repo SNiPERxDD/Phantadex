@@ -55,7 +55,8 @@ The system requires an initialized debugging interface on the host browser.
     `pyproject.toml`, so either installation route pulls them in.
 *   **Browser:** Google Chrome. Phantadex starts and attaches to its own debug
     instance under a dedicated profile, so Playwright's bundled browsers are
-    not needed.
+    not needed and there is no `playwright install` step. Playwright is used
+    only as a DevTools Protocol client.
 
 ### B. Installation
 
@@ -76,6 +77,37 @@ pdex -h
 An upgrade is `pipx upgrade phantadex`, or `pip install --upgrade phantadex`.
 Selectors learned by `pdex discover` live outside the package (§5), so an
 upgrade or a reinstall does not discard them.
+
+**Or hand the setup to a coding agent.** Paste the block below into Claude
+Code, Codex, Cursor, or any agent with a shell, and it has everything it needs
+to install the tool and leave a signed-in browser waiting:
+
+```text
+Install and set up Phantadex (https://github.com/SNiPERxDD/Phantadex), a CLI
+that drives an already-signed-in Chrome through Coursera coursework.
+
+1. Confirm Python 3.11 or newer is on PATH. Report the version you found.
+2. Install it with `pipx install phantadex`. If pipx is missing, install pipx
+   first (`python -m pip install --user pipx` then `python -m pipx ensurepath`),
+   and open a new shell so the PATH change takes effect. Fall back to
+   `python -m pip install --user phantadex` only if pipx cannot be installed.
+3. Verify with `pdex --version` and `pdex -h`. If `pdex` is not found, the
+   scripts directory is not on PATH -- say so and print the directory rather
+   than working around it with a full path.
+4. Do NOT run `playwright install`. Playwright is used here only as a DevTools
+   Protocol client; its bundled browsers are not needed.
+5. Run `pdex chrome`. It starts Google Chrome with its debugging port open on a
+   dedicated profile. If it reports the port is held by something that is not a
+   debug browser, set PHANTADEX_CDP_URL to http://localhost:9223 in my shell
+   profile and run `pdex chrome` again. Do not kill the process holding 9222
+   without asking me.
+6. Stop there and tell me to sign in to Coursera in the Chrome window it
+   opened, then open the course I want worked through.
+
+Do not sign in on my behalf, and do not enter any credentials anywhere. After I
+confirm I am signed in with a course open, run `pdex` to print the course tree
+so we can check the attachment works, and then stop and show me the output.
+```
 
 **From a clone (how to develop, and how to run an unreleased change):**
 
@@ -120,6 +152,23 @@ starts one on a profile kept with the tool's other state, so the courses stay
 signed in between runs. Set `PHANTADEX_CHROME` if Chrome lives somewhere
 unusual, `PHANTADEX_CHROME_PROFILE` to move the profile, and `--cdp-url` to use
 a different port.
+
+Port 9222 is not always free. On Windows it is often held by an OEM helper or
+by a WebView2 host, and the launcher refuses to claim a port it cannot confirm
+is a debug browser. Move Phantadex off it once, rather than per command:
+
+```bash
+# macOS / Linux
+export PHANTADEX_CDP_URL=http://localhost:9223
+
+# Windows (PowerShell)
+$env:PHANTADEX_CDP_URL = "http://localhost:9223"
+```
+
+```powershell
+# Name what is holding the port, if you would rather reclaim it
+netstat -ano | findstr :9222
+```
 
 > [!NOTE]
 > While this Chrome is running, its debugging port is open on localhost. Any
@@ -292,6 +341,9 @@ Configuration is passed on the command line; nothing needs to be edited in
 source. Both entry points share the connection flags:
 
 *   `--cdp-url` — DevTools endpoint (default `http://localhost:9222`).
+    `PHANTADEX_CDP_URL` moves that default for every command at once, for a
+    machine whose port 9222 belongs to something else; the flag still wins
+    where it is passed.
 *   `--transcript-dir` — root archive directory (default `phantadex_archive`).
     The default is relative, so `pdex watch` and `pdex archive` create it inside
     the directory they are launched from; pass an absolute path to keep one
@@ -311,7 +363,10 @@ source. Both entry points share the connection flags:
 `pdex watch` adds:
 
 *   `--skip` — seek each video into `97.5-98.5%` before watching, instead of
-    playing it through. Off by default: a run watches the whole video.
+    playing it through. Off by default: a run watches the whole video. Some
+    courses unlock seeking only once an item is complete; there the player takes
+    the seek, plays from it for a moment, then returns the position to where it
+    was. The run reports the rewind once and watches the video through.
 *   `--video-skip-range` — the range `--skip` seeks into, e.g. `97.5-98.5%` or
     `00:30-01:15`. Passing it implies `--skip`.
 *   `--no-video-skip` — force the seek off. This is the default; the flag is
@@ -340,7 +395,8 @@ as Watch; seeking is the whole point of that command, so it always seeks.
 `pdex archive` adds `--force` to re-scrape already-archived items.
 
 `pdex stop` accepts `--list`, which reports the running processes without
-stopping any of them.
+stopping any of them. It takes the shared flags above as well, so a session
+spent typing `--cdp-url` does not end on a parse error.
 
 ### Selectors
 

@@ -274,7 +274,7 @@ class HandlerBehaviourTests(unittest.TestCase):
     def test_a_video_abandoned_mid_watch_is_not_chased_to_pause(self):
         self.page.url = "https://www.coursera.org/learn/c/lecture/aaa/v"
 
-        def navigate_away(*_args):
+        def navigate_away(*_args, **_kwargs):
             self.page.url = "https://www.coursera.org/learn/c/quiz/bbb/q"
 
         pause = self._run_video_handle(watch_side_effect=navigate_away)
@@ -484,3 +484,54 @@ class NextWorkSeamTests(unittest.TestCase):
         with mock.patch.object(handlers.navigation, "advance", return_value="FAILED"):
             handlers.BaseHandler().advance(page, self.ctx, "/learn/c/lecture/a/b")
         self.ctx.next_work.assert_not_called()
+
+
+class PlatformRewoundSeekTests(unittest.TestCase):
+    """A seek the platform undoes must be reported, not left claimed in the log.
+
+    Some courses unlock seeking only once an item is complete: the player takes
+    the seek, plays from it briefly, then puts the position back. The run watches
+    the video through either way, so the only visible symptom was a log line
+    announcing a skip that had not happened.
+    """
+
+    ITEM = "https://www.coursera.org/learn/c/lecture/aaa/one"
+
+    def setUp(self):
+        self.ctx = handlers.Context(settings=config.Settings())
+        self.ctx.settings.video_completion_threshold = (99.0, 99.0)
+        self.page = FakePage(url=self.ITEM)
+
+    @staticmethod
+    def _snapshot(position):
+        """Returns a player state at ``position`` in a two-minute video."""
+        return {"currentTime": position, "duration": 120.0, "paused": False, "ended": False}
+
+    def _watch_through(self, positions, seeked):
+        """Runs the watch loop over ``positions`` and returns the warnings raised."""
+        states = [self._snapshot(position) for position in positions]
+        with (
+            mock.patch.object(handlers.video, "state", side_effect=states),
+            mock.patch.object(handlers.modals, "dismiss_all"),
+            mock.patch.object(handlers.VideoHandler, "_idle_fidget"),
+            mock.patch.object(handlers.time, "sleep"),
+            mock.patch.object(handlers.logs, "warn") as warn,
+        ):
+            handlers.VideoHandler()._watch(self.page, self.ctx, self.ITEM, seeked=seeked)
+        return [call.args[0] for call in warn.call_args_list]
+
+    def test_a_seek_the_platform_undoes_is_reported(self):
+        warnings = self._watch_through([110.0, 2.0, 119.0], seeked=True)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("rewound", warnings[0])
+
+    def test_the_rewind_is_reported_once_however_often_the_platform_repeats_it(self):
+        warnings = self._watch_through([110.0, 2.0, 100.0, 3.0, 119.0], seeked=True)
+        self.assertEqual(len(warnings), 1)
+
+    def test_a_video_that_was_never_seeked_reports_no_rewind(self):
+        self.assertEqual(self._watch_through([110.0, 2.0, 119.0], seeked=False), [])
+
+    def test_ordinary_rebuffering_is_not_mistaken_for_a_rewind(self):
+        drift = handlers.SEEK_REWIND_SECONDS - 1.0
+        self.assertEqual(self._watch_through([110.0, 110.0 - drift, 119.0], seeked=True), [])

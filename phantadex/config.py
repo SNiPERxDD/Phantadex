@@ -3,9 +3,10 @@
 import argparse
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 CDP_URL = "http://localhost:9222"
+CDP_URL_ENV = "PHANTADEX_CDP_URL"
 TRANSCRIPT_DIR = "phantadex_archive"
 DEFAULT_VIDEO_SKIP_RANGE = "97.5-98.5%"
 DEFAULT_VIDEO_THRESHOLD = (98.0, 100.0)
@@ -13,11 +14,22 @@ DEFAULT_READING_MINUTES = (7, 12)
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 
 
+def default_cdp_url():
+    """Returns the debugging endpoint commands attach to unless told otherwise.
+
+    ``PHANTADEX_CDP_URL`` overrides the built-in default. Port 9222 is not
+    always free -- on Windows in particular it is often held by an OEM helper
+    or a WebView2 host -- and without this every command in every session had
+    to be given ``--cdp-url`` by hand.
+    """
+    return os.environ.get(CDP_URL_ENV) or CDP_URL
+
+
 @dataclass
 class Settings:
     """Everything tunable in one place, instead of module-level globals."""
 
-    cdp_url: str = CDP_URL
+    cdp_url: str = field(default_factory=default_cdp_url)
     transcript_dir: str = TRANSCRIPT_DIR
     log_level: str = "INFO"
 
@@ -110,10 +122,11 @@ def program_name(subcommand=""):
 def build_parser(description, subcommand=""):
     """Builds the argument parser shared by both entry points."""
     parser = argparse.ArgumentParser(description=description, prog=program_name(subcommand))
+    endpoint = default_cdp_url()
     parser.add_argument(
         "--cdp-url",
-        default=CDP_URL,
-        help=f"Chrome DevTools Protocol endpoint (default: {CDP_URL})",
+        default=endpoint,
+        help=f"Chrome DevTools Protocol endpoint (default: {endpoint})",
     )
     parser.add_argument(
         "--transcript-dir",
@@ -371,7 +384,7 @@ def parse_reading_minutes(value):
 def settings_from_args(args):
     """Converts parsed arguments into a :class:`Settings` instance."""
     return Settings(
-        cdp_url=getattr(args, "cdp_url", CDP_URL),
+        cdp_url=getattr(args, "cdp_url", None) or default_cdp_url(),
         transcript_dir=getattr(args, "transcript_dir", TRANSCRIPT_DIR),
         log_level=resolve_log_level(args),
         video_completion_threshold=getattr(args, "video_threshold", DEFAULT_VIDEO_THRESHOLD),

@@ -23,7 +23,12 @@ from . import (
     video,
 )
 from .course_manager import CourseManager
-from .discovery import get_completion_status, get_detailed_course_map, get_robust_course_name
+from .discovery import (
+    COURSE_HEADER_TIMEOUT_MS,
+    get_completion_status,
+    get_detailed_course_map,
+    get_robust_course_name,
+)
 from .session import BrowserSession
 
 log = logs.get_logger("runner")
@@ -81,6 +86,9 @@ class Runner:
         # ``_sync_course_map`` runs on every tick, so the notice that no ledger
         # could be opened has to be raised once rather than each time round.
         self.warned_unmapped = False
+        # The URL the course header was last waited for on. Held so the wait is
+        # paid per navigation rather than per tick.
+        self.header_waited_url = ""
 
     HANDLER_FAILURE_LIMIT = 3
     # Passes an unclassified page is given before the run steps past it.
@@ -397,9 +405,17 @@ class Runner:
 
         Returns True when a new map was loaded on this call.
         """
+        # The read waits for the course header, because the platform swaps the
+        # URL before it renders the page underneath. A page the last tick already
+        # read has nothing left to render, so a course whose header selectors have
+        # drifted waits out the full timeout once per navigation instead of once
+        # per tick, where it would silently cost the loop eight seconds a pass.
+        page_url = page.url
+        timeout_ms = 0 if page_url == self.header_waited_url else COURSE_HEADER_TIMEOUT_MS
+        self.header_waited_url = page_url
         try:
-            course = get_robust_course_name(page)
-            course_key = urls.course_slug(page.url) or course
+            course = get_robust_course_name(page, timeout_ms=timeout_ms)
+            course_key = urls.course_slug(page_url) or course
         except Exception as exc:
             log.debug("Course name lookup failed: %s", exc)
             self._warn_unmapped("the course name could not be read")

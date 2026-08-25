@@ -333,6 +333,17 @@ class PackageCliTests(unittest.TestCase):
         self.assertEqual(result, 0)
         list_runs.assert_called_once_with()
 
+    def test_stop_accepts_the_global_options_every_other_command_takes(self):
+        # Stopping reads nothing from the browser, but a hand-rolled parser
+        # here made the one command reached for when a run has gone wrong the
+        # one that rejected the endpoint flag the user had typed all session.
+        cli = self._load_cli()
+        with mock.patch.object(cli.processes, "stop_all", return_value=0) as stop_all:
+            result = cli.main(["stop", "--cdp-url", "http://localhost:9333", "-q"])
+
+        self.assertEqual(result, 0)
+        stop_all.assert_called_once_with()
+
     def test_full_alias_names_itself_in_help(self):
         cli = self._load_cli()
         output = io.StringIO()
@@ -601,3 +612,31 @@ class RunLogFlagTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DebugEndpointDefaultTests(unittest.TestCase):
+    """The endpoint has to be configurable once, not on every command line.
+
+    Port 9222 is not always free -- on Windows it is regularly held by an OEM
+    helper or a WebView2 host -- and moving off it used to mean passing
+    ``--cdp-url`` to every command in every session.
+    """
+
+    def test_the_built_in_default_stands_when_nothing_is_set(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(config.CDP_URL_ENV, None)
+            self.assertEqual(config.default_cdp_url(), config.CDP_URL)
+
+    def test_the_environment_moves_every_command_at_once(self):
+        moved = "http://localhost:9333"
+        with mock.patch.dict(os.environ, {config.CDP_URL_ENV: moved}):
+            self.assertEqual(config.default_cdp_url(), moved)
+            self.assertEqual(config.Settings().cdp_url, moved)
+            parser = config.build_parser("", "watch")
+            self.assertEqual(config.settings_from_args(parser.parse_args([])).cdp_url, moved)
+
+    def test_an_explicit_flag_still_wins_over_the_environment(self):
+        with mock.patch.dict(os.environ, {config.CDP_URL_ENV: "http://localhost:9333"}):
+            parser = config.build_parser("", "watch")
+            settings = config.settings_from_args(parser.parse_args(["--cdp-url", "http://x:1"]))
+        self.assertEqual(settings.cdp_url, "http://x:1")

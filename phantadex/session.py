@@ -1,11 +1,10 @@
 """Chrome DevTools Protocol attachment and course-tab management."""
 
 import os
-from urllib.parse import urlparse
 
 from playwright.sync_api import sync_playwright
 
-from . import interaction, logs, urls
+from . import chrome, interaction, logs, urls
 
 log = logs.get_logger("session")
 
@@ -102,14 +101,12 @@ class BrowserSession:
     def _port_check_hint(self):
         """Returns the command that names what holds the debug port.
 
-        The port is read from the configured endpoint rather than assumed, and
-        the command is the one the host platform actually ships: ``lsof`` is not
-        present on Windows.
+        Both the port and the command come from the launcher, so the two halves
+        of the tool name the same port even for an endpoint the launcher parses
+        loosely -- a scheme-less ``PHANTADEX_CDP_URL`` reads as no port at all to
+        a strict parser, which would send the user to inspect the wrong one.
         """
-        port = urlparse(self.cdp_url).port or 9222
-        if os.name == "nt":
-            return f"netstat -ano | findstr :{port}"
-        return f"lsof -nP -iTCP:{port} -sTCP:LISTEN"
+        return chrome.port_owner_command(chrome.debug_port(self.cdp_url))
 
     def _diagnose(self, exc):
         """Turns an opaque CDP failure into an actionable message."""

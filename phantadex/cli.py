@@ -1,6 +1,5 @@
 """Unified Phantadex command line with ``phantadex`` and ``pdex`` aliases."""
 
-import argparse
 import sys
 
 from . import (
@@ -104,18 +103,22 @@ def discover_main(argv=None):
 
 
 def stop_main(argv=None):
-    """Terminates every Phantadex process on this machine."""
-    parser = argparse.ArgumentParser(
-        prog=config.program_name("stop"),
-        description="Phantadex Stop — end every running Phantadex process.",
-    )
+    """Terminates every Phantadex process on this machine.
+
+    Built on the shared parser like every other command, even though stopping
+    reads nothing from the browser. A hand-rolled parser here rejected the
+    global options the rest of the tool accepts, so the one command reached for
+    when a run has gone wrong was also the one that refused the flag the user
+    had been typing all session.
+    """
+    parser = config.build_parser("Phantadex Stop — end every running Phantadex process.", "stop")
     parser.add_argument(
         "--list",
         action="store_true",
         help="Show what is running without stopping it.",
     )
     args = parser.parse_args(argv)
-    logs.setup("INFO")
+    logs.setup(config.resolve_log_level(args))
     return processes.list_runs() if args.list else processes.stop_all()
 
 

@@ -37,6 +37,10 @@ STOPPED = "STOPPED"
 # does not cover that state, so the watch loop bounds it explicitly.
 POSITION_EPSILON = 0.05
 FROZEN_TICK_LIMIT = 90
+# A backwards jump larger than a stutter or a re-buffer. Some courses unlock
+# seeking only once an item is complete: the player accepts the seek, plays
+# from it for a moment, then returns the position to where it was.
+SEEK_REWIND_SECONDS = 5.0
 # Pause after a video meets its target, before the run advances.
 POST_TARGET_DWELL_RANGE = (2.0, 4.0)
 # Sub-minute dwell for an external resource that only needs its box ticked.
@@ -201,16 +205,21 @@ class VideoHandler(BaseHandler):
                 logs.warn("Transcript extraction failed.")
 
         video.mute_and_play(page)
-        video.seek_into_range(page, ctx.settings.video_skip_range)
-        self._watch(page, ctx, start_url)
+        seeked = video.seek_into_range(page, ctx.settings.video_skip_range)
+        self._watch(page, ctx, start_url, seeked=seeked)
         if urls.same_item(page.url, start_url):
             # The run leaves the item once the target is met; a player still
             # running at that moment reads as an abandoned session.
             video.pause_if_playing(page)
         return self.advance(page, ctx, start_url)
 
-    def _watch(self, page, ctx, start_url):
-        """Blocks until the video reaches its completion target or ends."""
+    def _watch(self, page, ctx, start_url, seeked=False):
+        """Blocks until the video reaches its completion target or ends.
+
+        ``seeked`` says a skip was performed on this video, which is what makes
+        a later rewind attributable to the platform rather than to the person
+        watching over the run's shoulder.
+        """
         logs.step("watching")
         paused_ticks = 0
         frozen_ticks = 0
@@ -238,6 +247,17 @@ class VideoHandler(BaseHandler):
             paused_ticks = self._handle_pause(page, ctx, snapshot, paused_ticks)
 
             position = snapshot["currentTime"]
+            if (
+                seeked
+                and last_position is not None
+                and position < last_position - SEEK_REWIND_SECONDS
+            ):
+                # Said once, and only where a seek was actually made. The run
+                # went on to watch the whole video either way; without this it
+                # did so behind a log line claiming the seek had worked.
+                seeked = False
+                logs.warn("the platform rewound the seek; this item allows it only once complete")
+                logs.step("watching it through instead")
             if last_position is not None and abs(position - last_position) < POSITION_EPSILON:
                 frozen_ticks += 1
             else:
