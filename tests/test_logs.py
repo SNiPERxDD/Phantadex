@@ -232,16 +232,35 @@ class RunLogTests(unittest.TestCase):
         self.assertFalse(any(isinstance(h, logs.RunLogHandler) for h in self.logger.handlers))
 
     def test_old_run_logs_are_pruned_so_the_directory_stays_bounded(self):
-        for index in range(6):
-            with open(os.path.join(self._tmp.name, f"watch-2026010{index}-000000.log"), "w"):
-                pass
+        # Stamped explicitly rather than left to the clock: six files created in
+        # a loop can share one timestamp on a filesystem with a coarse clock,
+        # which leaves the order to `os.listdir` and fails on Linux alone. The
+        # newest here is an `archive` log, so a prune that sorted by name would
+        # delete the one file it must keep -- which is the bug the sort by
+        # modification time was written for.
+        base = 1_700_000_000
+        for index in range(5):
+            self._stamp(f"watch-2026010{index}-000000.log", base + index)
+        self._stamp("archive-20260105-000000.log", base + 5)
 
         logs._prune_run_logs(self._tmp.name, keep=3)
 
         remaining = sorted(name for name in os.listdir(self._tmp.name) if name.endswith(".log"))
-        self.assertEqual(len(remaining), 3)
-        # The newest survive: the file names sort in the order they were written.
-        self.assertEqual(remaining[-1], "watch-20260105-000000.log")
+        self.assertEqual(
+            remaining,
+            [
+                "archive-20260105-000000.log",
+                "watch-20260103-000000.log",
+                "watch-20260104-000000.log",
+            ],
+        )
+
+    def _stamp(self, name, mtime):
+        """Creates a run log with a modification time of its own."""
+        path = os.path.join(self._tmp.name, name)
+        with open(path, "w"):
+            pass
+        os.utime(path, (mtime, mtime))
 
     def test_a_directory_that_cannot_be_opened_does_not_end_the_run(self):
         with (
