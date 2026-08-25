@@ -4,6 +4,14 @@ WORDS_PER_MINUTE = 200.0
 NON_TEXT_BUFFER = 1.2  # headers, images, code blocks
 MIN_READ_MINUTES = 0.5
 
+# Share of a narrated reading's audio the run stays for. The platform hands an
+# item off a few seconds after it completes, so leaving at the tail is also
+# what keeps our move and its move from racing for the same tab.
+NARRATION_SHARE = 0.9
+# Added to the word-count estimate. Arriving, finding the body and leaving are
+# not reading, but they are time spent on the item.
+READING_SETTLE_MINUTES = 0.5
+
 
 def parse_time_to_seconds(time_str):
     """Parses ``M:SS`` or ``H:MM:SS`` into seconds. Returns 0 when unparseable."""
@@ -86,3 +94,28 @@ def estimate_read_minutes(text_content):
     word_count = len(text_content.split())
     minutes = (word_count / WORDS_PER_MINUTE) * NON_TEXT_BUFFER
     return max(MIN_READ_MINUTES, minutes)
+
+
+def dwell_minutes(estimate_min, listed_min, narration_seconds=0.0, floor_min=1.0):
+    """Returns how long a reading is worth staying on.
+
+    Three sources, ordered by how much each of them actually knows.
+
+    A narration player carries the real length of the item and wins outright,
+    uncapped by the listed duration: the audio is the thing being timed, and a
+    listed figure that disagrees with it is the rounder guess. Measured against
+    a live course, a 1179-word reading listed at 10 minutes narrates in 7:48.
+
+    Without narration the word count is all there is, plus a constant for the
+    part of an item that is not reading. It used to be doubled instead --
+    ``min(listed, estimate * 2)`` -- which is where a reading anyone finishes in
+    five minutes became a nine-minute stare. The listed duration still caps it,
+    so a course that says ten minutes is never exceeded on a guess.
+
+    The floor never exceeds ``listed_min``: a caller asking for a deliberately
+    brief dwell gets one rather than being rounded up.
+    """
+    floor = min(floor_min, listed_min)
+    if narration_seconds and narration_seconds > 0:
+        return max(narration_seconds / 60.0 * NARRATION_SHARE, floor)
+    return max(min(listed_min, estimate_min + READING_SETTLE_MINUTES), floor)

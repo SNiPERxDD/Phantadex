@@ -102,6 +102,35 @@ class CourseTabTests(unittest.TestCase):
             attached.find_course_page("/learn/x/lecture/AbCd/intro")
         self.assertEqual(tab.goto_calls, [COURSE])
 
+    def test_a_tab_inside_a_course_beats_one_merely_on_the_platform(self):
+        # The catalogue and the enrolment list are the same host but carry no
+        # course to read; picking one leaves the run with nothing to attach to.
+        elsewhere = FakeTab("https://www.coursera.org/my-learning", "My Learning")
+        inside = FakeTab(COURSE, "Intro")
+        attached = self._session([elsewhere, inside])
+        with capture_console() as console:
+            self.assertIs(attached.find_course_page(), inside)
+        self.assertNotIn("course tabs are open", console.getvalue())
+
+    def test_a_platform_tab_outside_a_course_is_still_returned_when_it_is_all_there_is(self):
+        # Returned rather than reported as no tab at all, so the caller can say
+        # what it found and point at the way out.
+        elsewhere = FakeTab("https://www.coursera.org/my-learning", "My Learning")
+        attached = self._session([elsewhere])
+        with capture_console():
+            self.assertIs(attached.find_course_page(), elsewhere)
+
+    def test_several_off_course_tabs_are_not_described_as_course_tabs(self):
+        # The next line the run prints says the tab is not inside a course, so
+        # naming them course tabs contradicts it.
+        first = FakeTab("https://www.coursera.org/my-learning", "My Learning")
+        second = FakeTab("https://www.coursera.org/", "Coursera")
+        attached = self._session([first, second])
+        with capture_console() as console:
+            self.assertIs(attached.find_course_page(), first)
+        output = console.getvalue()
+        self.assertIn("2 platform tabs outside any course are open", output)
+
     def test_a_named_item_settles_which_of_several_tabs_is_meant(self):
         # No warning: naming the item is the answer to the question the
         # warning would have asked.

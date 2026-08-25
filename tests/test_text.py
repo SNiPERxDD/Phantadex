@@ -74,5 +74,44 @@ class CleanReadingTests(unittest.TestCase):
         self.assertIsNone(text.clean_reading(None))
 
 
+class AppendLinksTests(unittest.TestCase):
+    def test_a_body_with_no_links_is_untouched(self):
+        self.assertEqual(text.append_links("Body.", []), "Body.")
+
+    def test_a_link_is_listed_under_its_label(self):
+        body = text.append_links(
+            "Course-Diagram\nPPTX File", [("Course-Diagram PPTX File", "https://cdn/d.pptx")]
+        )
+        self.assertEqual(
+            body,
+            "Course-Diagram\nPPTX File\n\nLinks:\nCourse-Diagram PPTX File -- https://cdn/d.pptx",
+        )
+
+    def test_a_label_spanning_lines_is_flattened(self):
+        body = text.append_links("x", [("Course-Diagram\nPPTX File", "https://cdn/d.pptx")])
+        self.assertIn("Course-Diagram PPTX File -- https://cdn/d.pptx", body)
+
+    def test_a_url_already_written_out_is_not_repeated(self):
+        body = "Read https://example.com/paper for more."
+        self.assertEqual(
+            text.append_links(body, [("https://example.com/paper", "https://example.com/paper")]),
+            body,
+        )
+
+    def test_the_same_url_twice_is_listed_once(self):
+        body = text.append_links("x", [("Home", "https://a.com"), ("Home again", "https://a.com")])
+        self.assertEqual(body.count("https://a.com"), 1)
+
+    def test_a_link_with_no_label_is_listed_bare(self):
+        self.assertEqual(
+            text.append_links("x", [("", "https://a.com")]), "x\n\nLinks:\nhttps://a.com"
+        )
+
+    def test_an_empty_body_yields_the_block_alone(self):
+        self.assertEqual(
+            text.append_links("", [("Home", "https://a.com")]), "Links:\nHome -- https://a.com"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

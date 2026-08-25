@@ -122,18 +122,41 @@ def extract_transcript(page):
         # both methods produce comparable text for the ledger's dedup check.
         return text_utils.clean_transcript(downloaded), "File_Download"
 
+    if schema.first_visible(page, "transcript", "transcript_container") is None:
+        # Not every video carries a transcript, and one that does not renders
+        # neither the panel nor the toggle that opens it. Calling that a change
+        # in the markup spent the run's single stale-selector warning on a page
+        # that had not changed -- and the warning is reported once, so the next
+        # video whose markup really had drifted said nothing at all.
+        log.debug("No transcript panel on %s; this video offers none", page.url)
+        return None, "FAILED"
+
+    schema.report_stale("the video transcript")
     return None, "FAILED"
 
 
-def _transcript_from_panel(page):
-    """Scrapes the on-page transcript panel, opening the tab when needed."""
+def open_transcript_panel(page):
+    """Opens the transcript tab when the panel is collapsed. Returns success.
+
+    Separate from the scrape because discovery needs it too: a closed panel
+    leaves the *toggle* on screen and the body off it, so a selector probe run
+    against a fresh video page verified the button and never saw the transcript
+    it is supposed to find.
+    """
     try:
         tab = schema.first_visible(page, "transcript", "transcript_container")
         if tab is not None and tab.evaluate("el => el.tagName").lower() == "button":
             if interaction.click(page, tab, reaction_range=(0.2, 0.5)):
                 time.sleep(jitter.duration(1.0, 2.2))
+                return True
     except Exception as exc:
         log.debug("Transcript tab toggle failed: %s", exc)
+    return False
+
+
+def _transcript_from_panel(page):
+    """Scrapes the on-page transcript panel, opening the tab when needed."""
+    open_transcript_panel(page)
 
     for selector in schema.selectors_for("transcript", "transcript_container"):
         try:
@@ -208,13 +231,48 @@ def _first_visible_transcript_download(page, download_attribute_only=False):
     return None
 
 
+# Anchors inside the reading body, as ``[label, url]``. Fragment and script
+# links are interface, not content. The address is taken from ``a.href``, which
+# the browser has already resolved to an absolute URL.
+_READING_LINKS_JS = """
+el => Array.from(el.querySelectorAll('a[href]'))
+    .filter(a => {
+        const raw = a.getAttribute('href') || '';
+        return raw && !raw.startsWith('#') && !raw.toLowerCase().startsWith('javascript:');
+    })
+    .map(a => [a.innerText, a.href])
+"""
+
+
+def _reading_links(body):
+    """Returns the body's links as ``(label, url)`` pairs, or ``[]`` on failure.
+
+    Kept apart from the text read so that a page whose links cannot be walked
+    still archives its prose.
+    """
+    try:
+        return [(label, url) for label, url in body.evaluate(_READING_LINKS_JS)]
+    except Exception as exc:
+        log.debug("Reading link extraction failed: %s", exc)
+        return []
+
+
 def extract_reading(page):
     """Returns the reading body text, or ``None`` when it is missing/too short."""
     try:
         body = schema.first_visible(page, "content", "reading_body")
         if body is None:
+            schema.report_stale("the reading body")
             return None
         body_text = text_utils.clean_reading(body.inner_text())
+        if not body_text:
+            # Links are appended below and would carry an empty body past the
+            # length test, which is the one check standing between a reading
+            # that did not render and ten minutes of dwelling on it. A page that
+            # is really a download button still renders the button's label, so
+            # nothing legitimate reaches here with no text at all.
+            return None
+        body_text = text_utils.append_links(body_text, _reading_links(body))
         return body_text if len(body_text) >= MIN_READING_CHARS else None
     except Exception as exc:
         log.debug("Reading extraction failed: %s", exc)

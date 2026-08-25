@@ -27,6 +27,11 @@ log = logs.get_logger("handlers")
 # Outcomes returned to the runner.
 CONTINUE = "CONTINUE"
 COURSE_COMPLETE = "COURSE_COMPLETE"
+# The run ended for a reason that is not the course running out of items -- a
+# limit was reached, or there was nothing left it would act on. Kept apart from
+# COURSE_COMPLETE so neither is reported as the other. It lives here rather than
+# in the runner because a handler's advance can now reach it too.
+STOPPED = "STOPPED"
 
 # A player can report playing while its position never moves; pause recovery
 # does not cover that state, so the watch loop bounds it explicitly.
@@ -66,6 +71,10 @@ class Context:
     settings: object
     manager: object = None
     announced: set = field(default_factory=set)
+    # ``callable(page, start_url) -> outcome | None``, supplied by the runner:
+    # where the run goes when it is finished with an item. ``None`` means it
+    # could not tell, and the caller falls back to the platform's Next button.
+    next_work: object = None
 
     def reset_announcements(self):
         """Clears the per-item announcement dedup set."""
@@ -100,6 +109,31 @@ class BaseHandler:
     def handle(self, page, ctx):
         raise NotImplementedError
 
+    def already_archived(self, page, ctx):
+        """Reports whether the archive already holds this item's text.
+
+        Extraction is not free -- a transcript costs a tab click and a scrape --
+        and re-running it on an item the ledger already holds rewrites the same
+        file with the same words. The run says what it did once; it does not
+        keep doing it.
+        """
+        if ctx.manager is None:
+            return False
+        try:
+            return ctx.manager.is_archived(page.url)
+        except Exception as exc:
+            log.debug("Archive check failed: %s", exc)
+            return False
+
+    @staticmethod
+    def _still_here(page, start_url):
+        """Reports whether the tab is still on the item the handler started on."""
+        try:
+            return urls.same_item(page.url, start_url)
+        except Exception as exc:
+            log.debug("URL read before advancing failed: %s", exc)
+            return False
+
     def archive(self, page, ctx, text, method=""):
         """Persists extracted text through the course manager."""
         if not text:
@@ -117,7 +151,26 @@ class BaseHandler:
             return False
 
     def advance(self, page, ctx, start_url):
-        """Moves to the next item and maps the result onto an outcome."""
+        """Moves to the next item the run has work on, and maps it onto an outcome.
+
+        Adjacency is not the same as work. The item after this one is very often
+        already finished, and walking into it costs a page load and a completion
+        prompt to learn what the sidebar could have said from here. When the
+        runner can answer "where is the next thing to do", that answer is used;
+        the platform's Next button is the fallback for when it cannot.
+
+        Both routes defer to a page that has already moved. Only the fallback
+        used to: ``navigation.advance`` reports ``ALREADY_MOVED`` and does
+        nothing, while the work-based route asked where to go *from the item
+        this handler started on* and went there -- overriding the platform's own
+        hand-off, and overriding the user when they picked a different item
+        themselves. Whoever moved the tab is right about where it should be.
+        """
+        if ctx.next_work is not None and self._still_here(page, start_url):
+            outcome = ctx.next_work(page, start_url)
+            if outcome is not None:
+                return outcome
+
         result = navigation.advance(page, ctx.manager, start_url=start_url)
         if result == "COURSE_COMPLETE":
             return COURSE_COMPLETE
@@ -134,14 +187,18 @@ class VideoHandler(BaseHandler):
     summary = "Archives the transcript, then plays through to the completion target."
 
     def handle(self, page, ctx):
-        ctx.announce("video", "video")
+        ctx.announce("video", logs.type_tag(detection.VIDEO))
         start_url = page.url
 
-        text, method = page_ops.extract_transcript(page)
-        if text:
-            self.archive(page, ctx, text, method)
-        else:
-            logs.warn("Transcript extraction failed.")
+        # A transcript the archive already holds is not scraped again; the item
+        # is still watched, because being archived says nothing about whether
+        # the platform counts it as viewed.
+        if not self.already_archived(page, ctx):
+            text, method = page_ops.extract_transcript(page)
+            if text:
+                self.archive(page, ctx, text, method)
+            else:
+                logs.warn("Transcript extraction failed.")
 
         video.mute_and_play(page)
         video.seek_into_range(page, ctx.settings.video_skip_range)
@@ -253,8 +310,13 @@ class ReadingHandler(BaseHandler):
     summary = "Archives the body, dwells for the listed duration while scrolling, marks complete."
 
     def handle(self, page, ctx):
-        ctx.announce("reading", "reading")
+        ctx.announce("reading", logs.type_tag(detection.READING))
         start_url = page.url
+        archived = self.already_archived(page, ctx)
+        # Extracted whether or not the ledger holds it: a body that will not
+        # render is a page to fail on, not one to dwell ten minutes on and mark
+        # complete, and for a reading the read costs one locator lookup. What
+        # being archived saves is the *save* -- the file is not rewritten.
         text = page_ops.extract_reading(page)
         if not text:
             raise RuntimeError("Reading content was not found")
@@ -264,9 +326,17 @@ class ReadingHandler(BaseHandler):
         )
         logs.step(f"listed duration {minutes} min (source: {source})")
 
-        self.archive(page, ctx, text)
+        # Read here rather than inside the session: ``interaction`` cannot import
+        # the media reader without a cycle. A narrated reading is really an audio
+        # item wearing a page, and its player carries the only honest length.
+        narration = video.narration_seconds(page)
+        if narration:
+            logs.step(f"narrated, {timing.format_seconds(narration)}")
 
-        outcome = interaction.reading_session(page, minutes)
+        if not archived:
+            self.archive(page, ctx, text)
+
+        outcome = interaction.reading_session(page, minutes, narration)
         if outcome == "INTERRUPTED":
             # Returning CONTINUE here re-entered this handler forever: no
             # exception reached the runner, so its failure counter never moved.
@@ -289,17 +359,23 @@ class QuizHandler(BaseHandler):
         if detection.is_graded(page):
             if ctx.settings.pause_on_graded:
                 return self._await_human(page, ctx)
-            ctx.announce("quiz_graded", "graded quiz -- not auto-answered")
+            ctx.announce(
+                "quiz_graded", f"graded {logs.type_tag(detection.QUIZ)} -- not auto-answered"
+            )
             logs.step("advancing past it; --pause-on-graded waits for you instead")
             return self.advance(page, ctx, page.url)
 
-        ctx.announce("quiz_skip", "ungraded quiz (practice/orientation)")
+        ctx.announce(
+            "quiz_skip", f"ungraded {logs.type_tag(detection.QUIZ)} (practice/orientation)"
+        )
         logs.step("stepping past without answering")
         return self.advance(page, ctx, page.url)
 
     def _await_human(self, page, ctx):
         """Pauses the run until the grader page is cleared, then moves on."""
-        if ctx.announce("quiz_graded", "graded quiz -- not auto-answered"):
+        if ctx.announce(
+            "quiz_graded", f"graded {logs.type_tag(detection.QUIZ)} -- not auto-answered"
+        ):
             logs.step("paused -- complete this yourself; the run resumes after")
             _notify("Phantadex Watch", "Graded quiz detected - manual input needed.")
 
@@ -354,7 +430,7 @@ class PluginHandler(BaseHandler):
     summary = "Ungraded plugin, external tool or lab. Ticked off if it offers a control."
 
     def handle(self, page, ctx):
-        ctx.announce("plugin", "external resource / ungraded plugin")
+        ctx.announce("plugin", f"external resource / {logs.type_tag(detection.UNGRADED_PLUGIN)}")
         start_url = page.url
 
         if schema.first_visible(page, "navigation", "mark_complete") is not None:
@@ -374,7 +450,7 @@ class AssignmentHandler(PluginHandler):
     summary = "Peer and honors work is left to you. Nothing is drafted or submitted."
 
     def handle(self, page, ctx):
-        ctx.announce("assignment", "peer or honors assignment")
+        ctx.announce("assignment", f"peer or honors {logs.type_tag(detection.ASSIGNMENT)}")
         start_url = page.url
         if not ctx.settings.pause_on_graded:
             logs.step("advancing past it; --pause-on-graded waits for you instead")
@@ -394,7 +470,7 @@ class SurveyHandler(BaseHandler):
     summary = "Stepped past unanswered: it asks about you, not about the course."
 
     def handle(self, page, ctx):
-        ctx.announce("survey", "survey -- not answered")
+        ctx.announce("survey", f"{logs.type_tag(detection.SURVEY)} -- not answered")
         logs.step("stepping past it; it asks about you, not the course")
         return self.advance(page, ctx, page.url)
 
@@ -407,9 +483,10 @@ class DiscussionHandler(BaseHandler):
     summary = "Archives the prompt. No reply is composed or posted."
 
     def handle(self, page, ctx):
-        ctx.announce("discussion", "discussion prompt")
+        ctx.announce("discussion", f"{logs.type_tag(detection.DISCUSSION)} prompt")
         start_url = page.url
-        self.archive(page, ctx, page_ops.extract_reading(page))
+        if not self.already_archived(page, ctx):
+            self.archive(page, ctx, page_ops.extract_reading(page))
         return self.advance(page, ctx, start_url)
 
 
@@ -429,7 +506,7 @@ class DialogueHandler(BaseHandler):
     summary = "Opened, closed, and the closing confirmed, which is what completes it."
 
     def handle(self, page, ctx):
-        ctx.announce("dialogue", "roleplay dialogue")
+        ctx.announce("dialogue", f"roleplay {logs.type_tag(detection.DIALOGUE)}")
         start_url = page.url
 
         if self._control(page, "finished") is not None:

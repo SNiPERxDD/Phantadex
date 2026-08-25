@@ -3,8 +3,8 @@
 import unittest
 from unittest import mock
 
-from phantadex import interaction, urls
-from tests.fakes import FakeLocator, FakePage
+from phantadex import interaction, timing, urls
+from tests.fakes import FakeLocator, FakePage, capture_console
 
 CONTENT_SELECTOR = "div.rc-CML, main, div[role='main']"
 
@@ -248,6 +248,44 @@ class ReadingSessionTests(unittest.TestCase):
             result = interaction.reading_session(page, 1)
 
         self.assertEqual(result, "NAVIGATED")
+
+
+class SessionGeometryTests(unittest.TestCase):
+    """How long the dwell lasts, and what it is measured against."""
+
+    def _geometry(self, text, listed, narration=0.0):
+        content = FakeLocator(count=1, text=text)
+        with capture_console() as output:
+            duration, _x, _y = interaction._session_geometry(
+                _ViewportPage(), content, True, listed, narration
+            )
+        return duration, output.getvalue()
+
+    def test_narration_paces_the_dwell_and_is_named_in_the_log(self):
+        duration, printed = self._geometry("word " * 300, 10, 467.712)
+        self.assertEqual(duration, int(467.712 / 60 * 0.9 * 60))
+        self.assertIn("narration 7:48", printed)
+
+    def test_the_dwell_ends_before_the_narration_and_the_platform_hand_off(self):
+        duration, _ = self._geometry("word " * 300, 10, 467.712)
+        self.assertLess(duration, 467.712)
+
+    def test_a_plain_reading_is_measured_by_its_own_word_count(self):
+        duration, printed = self._geometry("word " * 400, 10)
+        expected = timing.estimate_read_minutes("word " * 400) + timing.READING_SETTLE_MINUTES
+        self.assertEqual(duration, int(expected * 60))
+        self.assertIn("400 words", printed)
+
+    def test_a_short_reading_is_no_longer_held_for_the_listed_duration(self):
+        # min(listed, estimate * 2) turned a two-minute page into a four-minute
+        # one for no reason anybody could see.
+        duration, _ = self._geometry("word " * 400, 10)
+        self.assertLess(duration, 4 * 60)
+
+    def test_a_page_with_no_body_falls_back_to_the_listed_duration(self):
+        with capture_console():
+            duration, _x, _y = interaction._session_geometry(_ViewportPage(), None, False, 3)
+        self.assertEqual(duration, 180)
 
 
 if __name__ == "__main__":

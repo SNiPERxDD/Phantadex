@@ -69,5 +69,32 @@ class ReadEstimateTests(unittest.TestCase):
         self.assertEqual(timing.estimate_read_minutes(""), 1.0)
 
 
+class DwellMinutesTests(unittest.TestCase):
+    """How long a reading is worth staying on."""
+
+    def test_narration_sets_the_pace_and_ignores_the_listed_duration(self):
+        # 7:48 of audio on an item Coursera lists at 10 minutes.
+        self.assertAlmostEqual(timing.dwell_minutes(5.9, 10, 467.7), 7.0155)
+
+    def test_the_dwell_ends_before_the_narration_does(self):
+        # Leaving at the end of the audio is leaving after the platform has
+        # already started moving the tab itself.
+        self.assertLess(timing.dwell_minutes(1.0, 10, 600.0), 10.0)
+
+    def test_without_narration_the_estimate_gets_a_settling_margin(self):
+        self.assertEqual(timing.dwell_minutes(4.0, 10), 4.0 + timing.READING_SETTLE_MINUTES)
+
+    def test_the_listed_duration_caps_a_long_estimate(self):
+        self.assertEqual(timing.dwell_minutes(30.0, 10), 10)
+
+    def test_a_short_reading_is_no_longer_doubled(self):
+        # The old formula was min(listed, estimate * 2): a five-minute reading
+        # became a nine-minute stare on a page listed at nine.
+        self.assertLess(timing.dwell_minutes(4.5, 9), 4.5 * 2)
+
+    def test_the_floor_never_exceeds_what_the_caller_asked_for(self):
+        self.assertEqual(timing.dwell_minutes(0.1, 0.2, floor_min=1.0), 0.2)
+
+
 if __name__ == "__main__":
     unittest.main()

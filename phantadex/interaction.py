@@ -381,8 +381,12 @@ def silence_media(page):
 # ---------------------------------------------------------- reading session
 
 
-def reading_session(page, metadata_wait_min):
-    """Scrolls through a reading for a word-count-derived duration.
+def reading_session(page, metadata_wait_min, narration_seconds=0.0):
+    """Scrolls through a reading for as long as the item is worth.
+
+    ``narration_seconds`` is the length of the reading's audio narration when it
+    has one; the caller measures it, because this module cannot import the
+    player without a cycle. It is what the dwell is paced by when present.
 
     Returns ``"COMPLETED"``, ``"NAVIGATED"``, or ``"INTERRUPTED"``.
     """
@@ -391,7 +395,7 @@ def reading_session(page, metadata_wait_min):
         content = page.locator("div.rc-CML, main, div[role='main']").first
         has_content = content.count() > 0
         duration_sec, anchor_x, anchor_y = _session_geometry(
-            page, content, has_content, metadata_wait_min
+            page, content, has_content, metadata_wait_min, narration_seconds
         )
 
         scroller = find_scroller(page, content) if has_content else None
@@ -448,23 +452,33 @@ def _caption(metrics, seconds_left):
     return f"{left} · scrolled {depth}%"
 
 
-def _session_geometry(page, content, has_content, metadata_wait_min):
+def _session_geometry(page, content, has_content, metadata_wait_min, narration_seconds=0.0):
     """Derives (duration_seconds, anchor_x, anchor_y) for a reading session."""
     if not has_content:
         logs.warn("Content element not found. Using default scroll area.")
-        return metadata_wait_min * 60, DEFAULT_SCROLL_ANCHOR[0], DEFAULT_SCROLL_ANCHOR[1]
+        # No body means no word count, so the listed duration is the only
+        # estimate left -- but narration is measured from the player rather than
+        # from the text, and it is still the honest length when there is one.
+        minutes = (
+            timing.dwell_minutes(0, metadata_wait_min, narration_seconds, MINIMUM_DWELL_MINUTES)
+            if narration_seconds > 0
+            else metadata_wait_min
+        )
+        return int(minutes * 60), DEFAULT_SCROLL_ANCHOR[0], DEFAULT_SCROLL_ANCHOR[1]
 
     text = content.inner_text()
-    real_time_min = timing.estimate_read_minutes(text)
-    # Cap against the metadata estimate so a two-paragraph page is not a 10m stare.
-    # The floor never exceeds the caller's request, so a deliberately brief
-    # dwell stays brief instead of being rounded up to a full minute.
-    floor_min = min(MINIMUM_DWELL_MINUTES, metadata_wait_min)
-    final_wait_min = max(min(metadata_wait_min, real_time_min * 2), floor_min)
-    duration_sec = int(final_wait_min * 60)
-    logs.step(
-        f"dwell {final_wait_min:.1f}m (metadata {metadata_wait_min}m, {len(text.split())} words)"
+    final_wait_min = timing.dwell_minutes(
+        timing.estimate_read_minutes(text),
+        metadata_wait_min,
+        narration_seconds,
+        MINIMUM_DWELL_MINUTES,
     )
+    duration_sec = int(final_wait_min * 60)
+    if narration_seconds > 0:
+        source = f"narration {timing.format_seconds(narration_seconds)}"
+    else:
+        source = f"metadata {metadata_wait_min}m, {len(text.split())} words"
+    logs.step(f"dwell {final_wait_min:.1f}m ({source})")
 
     box = content.bounding_box()
     if not box:

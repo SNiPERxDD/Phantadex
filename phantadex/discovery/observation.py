@@ -16,6 +16,11 @@ log = logs.get_logger("discovery.observation")
 # Sentinel written to the last-seen URL while no course tab is open, so the
 # "waiting" notice is logged once rather than on every poll.
 WAITING = "WAITING"
+# Polls the loop may spend without the open item changing. At the two-second
+# poll below that is about a minute -- far longer than any hop the session
+# makes itself, and short enough that a wedged pass says so rather than
+# sitting there.
+STILL_TICKS = 30
 
 
 def auto_hop_next(page, config):
@@ -77,9 +82,15 @@ def get_sidebar_targets(page, state, force_print=False):
                 targets.setdefault(item_type, href)
 
     # Only the types the course actually contains can ever be verified, so the
-    # exit condition is narrowed to those.
-    state.required_types = found_types
-    logs.step(f"exit targets: {sorted(found_types)}")
+    # exit condition is narrowed to those. An empty read is not such a course:
+    # a sidebar that has not rendered, or one virtualized down to the open
+    # module, yields nothing and used to empty the exit condition outright --
+    # which closed the pass after a single page and called it a success.
+    if found_types:
+        state.required_types = found_types
+        logs.step(f"exit targets: {sorted(found_types)}")
+    else:
+        logs.warn("the sidebar read as empty; keeping the exit targets already known")
 
     return targets
 
@@ -146,6 +157,7 @@ def start_dynamic_observation(cdp_url=config.CDP_URL, course_url=""):
 def _observe(browser_context, state):
     """Polls the course tab, probing selectors whenever the item changes."""
     last_url = ""
+    still_ticks = 0
     while True:
         # ``_course_tab`` rather than ``BrowserSession.find_course_page``: that
         # one raises the tab to the front, which at this poll interval would
@@ -166,6 +178,17 @@ def _observe(browser_context, state):
                 get_sidebar_targets(page, state, force_print=True)
 
             current_url = page.url.split("?")[0].split("#")[0]
+            still_ticks = 0 if current_url != last_url else still_ticks + 1
+            if still_ticks >= STILL_TICKS:
+                # ``auto_hop_next`` reports the click, not the navigation, so a
+                # Next that is swallowed -- or absent because this is the last
+                # item -- reads as a successful hop that goes nowhere. The poll
+                # then waits for a URL change that will never come, in silence,
+                # forever. This is the same shape the ``attempted_types`` trap
+                # closed on the goto path; the fallback branch needed its own.
+                logs.warn(f"nothing moved in {still_ticks} passes; the item is not advancing")
+                _report_close(state)
+                return
             if current_url != last_url:
                 # Give the item a moment to render before probing it.
                 time.sleep(4)

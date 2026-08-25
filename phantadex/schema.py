@@ -101,6 +101,7 @@ def reload_verified_selectors():
     """Drops the cache so a fresh discovery run's output is picked up."""
     global _overrides_cache
     _overrides_cache = None
+    _reported_stale.clear()
 
 
 def _verified_for(category, element_name):
@@ -169,3 +170,23 @@ def state_selectors():
         for category, elements in _read_yaml_mapping(state_config_path()).items()
         if isinstance(elements, dict)
     }
+
+
+# Elements already reported stale this run. The hint is worth saying once and
+# is noise every time after that: a course with forty videos whose transcript
+# markup has moved would otherwise print it forty times.
+_reported_stale = set()
+
+
+def report_stale(element_name):
+    """Warns, once per run, that an element's markup no longer matches.
+
+    Every shipped selector missing is the signal that Coursera has changed the
+    page, not that this item is unusual. A run cannot repair that itself -- it
+    reads selectors, it does not learn them -- so it names the element and
+    points at the pass that can.
+    """
+    if element_name in _reported_stale:
+        return
+    _reported_stale.add(element_name)
+    logs.warn(f"no selector matched {element_name}; the markup has changed -- run 'pdex discover'")

@@ -6,7 +6,7 @@ hierarchy is recovered by walking that list, not by nesting selectors.
 
 import time
 
-from .. import interaction, logs, page_ops, urls
+from .. import interaction, logs, page_ops, progress, urls
 from . import row_text
 from .rules import apply_filler_override, classify_sidebar_row, parse_duration
 
@@ -171,41 +171,34 @@ def get_completion_status(page):
     return status
 
 
-def print_course_map(course_map, course_title="Course", completion_status=None):
-    """Prints the course structure through the shared Phantadex theme."""
+def print_course_map(course_map, course_title="Course", completion_status=None, is_archived=None):
+    """Prints the course structure through the shared Phantadex theme.
+
+    ``is_archived`` is the ledger predicate :mod:`phantadex.progress` needs to
+    tell a discussion the run has already read from one it has not; without it
+    every unfinished discussion is counted as the run's work, which is what it
+    is until the ledger holds it.
+    """
     if not course_map:
         logs.warn("Course map is empty or could not be parsed.")
         return
 
     all_lessons = [lesson for lessons in course_map.values() for lesson in lessons]
-    completed = 0
-    remaining = 0
-    if completion_status is not None:
-        for _title, _item_type, href, _duration in all_lessons:
-            state = completion_status.get(urls.normalize_path(href))
-            completed += state is True
-            remaining += state is False
 
     logs.banner("Phantadex Dex", course_title)
-    summary = f"{len(all_lessons)} items"
-    if completion_status is not None:
-        summary += f" · {completed} complete · {remaining} remaining"
-    logs.step(summary)
+    if completion_status is None:
+        logs.step(f"{len(all_lessons)} items")
+    else:
+        logs.step(progress.summary(progress.split(all_lessons, completion_status, is_archived)))
 
     for module, lessons in course_map.items():
-        module_completed = (
-            sum(
-                completion_status.get(urls.normalize_path(href)) is True
-                for _title, _item_type, href, _duration in lessons
-            )
-            if completion_status is not None
-            else 0
-        )
-        tag = f"{module_completed}/{len(lessons)} complete" if completion_status is not None else ""
-        logs.item(module, tag)
+        header = ""
+        if completion_status is not None:
+            header = progress.tag(progress.split(lessons, completion_status, is_archived))
+        logs.item(module, header)
 
         for title, item_type, href, duration in lessons:
-            detail = f"{title} · {item_type.lower().replace('_', ' ')}"
+            detail = f"{title} · {logs.type_tag(item_type)}"
             if duration:
                 detail += f" · {duration}"
             state = (

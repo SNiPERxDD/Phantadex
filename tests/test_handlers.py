@@ -9,11 +9,12 @@ from tests.fakes import FakeLocator, FakePage
 
 
 class FakeManager:
-    def __init__(self):
+    def __init__(self, archived=False):
         self.saved = []
+        self.archived = archived
 
     def is_archived(self, _url):
-        return False
+        return self.archived
 
     def save_content(self, url, text, content_type):
         self.saved.append((url, text, content_type))
@@ -190,6 +191,42 @@ class HandlerBehaviourTests(unittest.TestCase):
         duration.assert_not_called()
         reading_session.assert_not_called()
 
+    def test_a_narrated_reading_is_timed_by_its_audio(self):
+        # The handler does the read: `interaction` cannot import the media
+        # reader without a cycle, so the length is handed down to it.
+        self.page.url = "https://www.coursera.org/learn/c/supplement/aaa/reading"
+        with (
+            mock.patch.object(handlers.page_ops, "extract_reading", return_value="Reading body"),
+            mock.patch.object(
+                handlers.page_ops, "detect_reading_minutes", return_value=(10, "sidebar")
+            ),
+            mock.patch.object(handlers.video, "narration_seconds", return_value=467.7),
+            mock.patch.object(
+                handlers.interaction, "reading_session", return_value="COMPLETED"
+            ) as session,
+            mock.patch.object(handlers.navigation, "mark_complete"),
+        ):
+            handlers.ReadingHandler().handle(self.page, self.ctx)
+
+        self.assertEqual(session.call_args.args[1:], (10, 467.7))
+
+    def test_a_plain_reading_reports_no_narration(self):
+        self.page.url = "https://www.coursera.org/learn/c/supplement/aaa/reading"
+        with (
+            mock.patch.object(handlers.page_ops, "extract_reading", return_value="Reading body"),
+            mock.patch.object(
+                handlers.page_ops, "detect_reading_minutes", return_value=(10, "sidebar")
+            ),
+            mock.patch.object(handlers.video, "narration_seconds", return_value=0.0),
+            mock.patch.object(
+                handlers.interaction, "reading_session", return_value="COMPLETED"
+            ) as session,
+            mock.patch.object(handlers.navigation, "mark_complete"),
+        ):
+            handlers.ReadingHandler().handle(self.page, self.ctx)
+
+        self.assertEqual(session.call_args.args[1:], (10, 0.0))
+
     def test_reading_navigation_does_not_complete_or_advance_the_new_page(self):
         self.page.url = "https://www.coursera.org/learn/c/supplement/aaa/reading"
         with (
@@ -337,3 +374,113 @@ class DialogueHandlerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AlreadyArchivedTests(unittest.TestCase):
+    """An item the archive already holds is not scraped again.
+
+    Extraction is not free -- a transcript costs a tab click and a scrape -- and
+    re-running it rewrites the same file with the same words. Being archived is
+    not the same as being complete, though, so the item is still worked.
+    """
+
+    def setUp(self):
+        self.ctx = handlers.Context(settings=config.Settings())
+        self.ctx.manager = FakeManager(archived=True)
+        self.page = FakePage(url="https://www.coursera.org/learn/c/lecture/aaa/intro")
+        patcher = mock.patch.object(handlers.navigation, "advance", return_value="NAVIGATED")
+        self.advance = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_an_archived_transcript_is_not_scraped_again_but_the_video_is_watched(self):
+        with (
+            mock.patch.object(handlers.page_ops, "extract_transcript") as extract,
+            mock.patch.object(handlers.video, "mute_and_play") as play,
+            mock.patch.object(handlers.video, "seek_into_range"),
+            mock.patch.object(handlers.VideoHandler, "_watch"),
+            mock.patch.object(handlers.video, "pause_if_playing"),
+        ):
+            handlers.VideoHandler().handle(self.page, self.ctx)
+        extract.assert_not_called()
+        self.assertEqual(self.ctx.manager.saved, [])
+        play.assert_called_once()
+
+    def test_an_archived_reading_is_still_dwelled_on_and_marked_complete(self):
+        with (
+            mock.patch.object(handlers.page_ops, "extract_reading", return_value="Body."),
+            mock.patch.object(handlers.page_ops, "detect_reading_minutes", return_value=(1, "map")),
+            mock.patch.object(handlers.interaction, "reading_session", return_value="COMPLETED"),
+            mock.patch.object(handlers.navigation, "mark_complete") as mark,
+        ):
+            handlers.ReadingHandler().handle(self.page, self.ctx)
+        self.assertEqual(self.ctx.manager.saved, [])
+        mark.assert_called_once()
+
+    def test_an_archived_reading_that_will_not_render_still_fails(self):
+        # Being in the ledger says the text was read once, not that the page in
+        # front of the run has any. Without the guard the run dwelled the listed
+        # minutes on an empty page and then marked it complete.
+        with (
+            mock.patch.object(handlers.page_ops, "extract_reading", return_value=None),
+            mock.patch.object(handlers.interaction, "reading_session") as session,
+        ):
+            with self.assertRaises(RuntimeError):
+                handlers.ReadingHandler().handle(self.page, self.ctx)
+        session.assert_not_called()
+
+    def test_an_archived_discussion_prompt_is_not_saved_twice(self):
+        with mock.patch.object(handlers.page_ops, "extract_reading") as extract:
+            handlers.DiscussionHandler().handle(self.page, self.ctx)
+        extract.assert_not_called()
+        self.assertEqual(self.ctx.manager.saved, [])
+
+    def test_an_unreadable_ledger_is_treated_as_not_archived(self):
+        self.ctx.manager = mock.Mock(is_archived=mock.Mock(side_effect=RuntimeError("locked")))
+        self.assertFalse(handlers.BaseHandler().already_archived(self.page, self.ctx))
+
+
+class NextWorkSeamTests(unittest.TestCase):
+    """Where a handler goes when it is done: the runner answers, or the platform."""
+
+    def setUp(self):
+        self.ctx = handlers.Context(settings=config.Settings())
+        self.page = FakePage()
+
+    def test_the_runners_answer_is_used_when_it_has_one(self):
+        self.ctx.next_work = mock.Mock(return_value=handlers.COURSE_COMPLETE)
+        with mock.patch.object(handlers.navigation, "advance") as advance:
+            outcome = handlers.BaseHandler().advance(self.page, self.ctx, self.page.url)
+        self.assertEqual(outcome, handlers.COURSE_COMPLETE)
+        advance.assert_not_called()
+
+    def test_no_answer_falls_back_to_the_next_button(self):
+        self.ctx.next_work = mock.Mock(return_value=None)
+        with mock.patch.object(handlers.navigation, "advance", return_value="NAVIGATED"):
+            outcome = handlers.BaseHandler().advance(self.page, self.ctx, self.page.url)
+        self.assertEqual(outcome, handlers.CONTINUE)
+
+    def test_a_context_without_a_runner_still_advances(self):
+        with mock.patch.object(handlers.navigation, "advance", return_value="NAVIGATED") as adv:
+            handlers.BaseHandler().advance(self.page, self.ctx, self.page.url)
+        adv.assert_called_once()
+
+    def test_a_page_that_already_moved_is_not_asked_where_to_go(self):
+        # Coursera hands off to the next item itself once an item completes, and
+        # the user may click a different chapter at any moment. The runner would
+        # answer from the item the handler *started* on and navigate back off
+        # whatever is now open.
+        start_url = self.page.url
+        self.page.url = "/learn/course/lecture/xyz/somewhere-else"
+        self.ctx.next_work = mock.Mock(return_value=handlers.COURSE_COMPLETE)
+        with mock.patch.object(handlers.navigation, "advance", return_value="ALREADY_MOVED"):
+            outcome = handlers.BaseHandler().advance(self.page, self.ctx, start_url)
+        self.assertEqual(outcome, handlers.CONTINUE)
+        self.ctx.next_work.assert_not_called()
+
+    def test_an_unreadable_url_defers_rather_than_guessing(self):
+        page = mock.Mock()
+        type(page).url = mock.PropertyMock(side_effect=RuntimeError("tab gone"))
+        self.ctx.next_work = mock.Mock(return_value=handlers.COURSE_COMPLETE)
+        with mock.patch.object(handlers.navigation, "advance", return_value="FAILED"):
+            handlers.BaseHandler().advance(page, self.ctx, "/learn/c/lecture/a/b")
+        self.ctx.next_work.assert_not_called()

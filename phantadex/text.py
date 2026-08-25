@@ -74,3 +74,29 @@ def clean_reading(text):
             continue
         out.append(line)
     return "\n".join(out).strip()
+
+
+def append_links(text, links):
+    """Returns the reading text with a block listing its links appended.
+
+    ``inner_text`` renders an anchor as its label and throws the address away,
+    so a reading that is really a download button ("Course-Diagram PPTX File")
+    or a list of further resources archived as a handful of words pointing
+    nowhere. The addresses go in a block of their own rather than inline, which
+    leaves the body readable; a link whose label already spells out its address
+    is not repeated.
+
+    ``links`` is a sequence of ``(label, url)`` pairs.
+    """
+    entries = []
+    seen = set()
+    for label, url in links:
+        if not url or url in seen or url in text:
+            continue
+        seen.add(url)
+        label = " ".join(label.split())
+        entries.append(f"{label} -- {url}" if label else url)
+    if not entries:
+        return text
+    block = "Links:\n" + "\n".join(entries)
+    return f"{text}\n\n{block}" if text else block

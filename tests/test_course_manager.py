@@ -439,6 +439,170 @@ class PreviousUrlTests(CourseManagerTestCase):
         self.assertIsNone(self.manager.get_previous_url("/learn/demo/lecture/zzz/nope"))
 
 
+PEER_COURSE_MAP = {
+    "Module 1": [
+        ("Intro", "VIDEO", "/learn/demo/lecture/aaa/intro", 5),
+    ],
+    "Module 2": [
+        # Two sidebar rows, one opaque item id: Coursera serves a peer
+        # assignment's submission and its review of classmates under the same id.
+        ("Digital Detox", "ASSIGNMENT", "/learn/demo/peer/bbb/exercise-digital-detox", 60),
+        ("Review classmates", "ASSIGNMENT", "/learn/demo/peer/bbb/give-feedback", 30),
+        ("Conclusion", "VIDEO", "/learn/demo/lecture/ccc/conclusion", 4),
+    ],
+}
+
+
+class SharedItemIdTests(unittest.TestCase):
+    """Two map rows for one item must not be offered as each other's successor."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.manager = CourseManager(PEER_COURSE_MAP, "Demo", root_dir=self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_the_next_item_after_a_peer_row_is_a_different_item(self):
+        # The loop this fixes: the row after the submission is the review, which
+        # is the same item, so navigating there was a no-op, the handler advanced
+        # again, and the run repeated the pair until it was killed.
+        for row in (
+            "/learn/demo/peer/bbb/exercise-digital-detox",
+            "/learn/demo/peer/bbb/give-feedback",
+        ):
+            self.assertEqual(
+                self.manager.get_next_url(row),
+                "https://www.coursera.org/learn/demo/lecture/ccc/conclusion",
+                row,
+            )
+
+    def test_the_previous_item_before_a_peer_row_is_a_different_item(self):
+        for row in (
+            "/learn/demo/peer/bbb/exercise-digital-detox",
+            "/learn/demo/peer/bbb/give-feedback",
+        ):
+            self.assertEqual(
+                self.manager.get_previous_url(row),
+                "https://www.coursera.org/learn/demo/lecture/aaa/intro",
+                row,
+            )
+
+    def test_the_genuine_last_item_still_reports_the_end(self):
+        self.assertIsNone(self.manager.get_next_url("/learn/demo/lecture/ccc/conclusion"))
+
+    def test_the_first_item_still_reports_the_start(self):
+        self.assertIsNone(self.manager.get_previous_url("/learn/demo/lecture/aaa/intro"))
+
+    def test_shared_rows_count_as_one_item(self):
+        # Four rows, three items: a run bounded at "3 items" is asking for three
+        # things to sit through, not three lines in the sidebar.
+        self.assertEqual(self.manager.item_count(), 3)
+        self.assertEqual(self.manager.module_count(), 2)
+
+
+class ModuleLookupTests(CourseManagerTestCase):
+    """An item has to be able to say which module holds it."""
+
+    def test_each_item_reports_its_own_module(self):
+        self.assertEqual(self.manager.module_for("/learn/demo/lecture/aaa/welcome"), "Module 1")
+        self.assertEqual(self.manager.module_for("/learn/demo/quiz/ccc/practice"), "Module 1")
+        self.assertEqual(self.manager.module_for("/learn/demo/lecture/ddd/deep-dive"), "Module 2")
+
+    def test_an_absolute_url_resolves_as_well_as_a_path(self):
+        self.assertEqual(
+            self.manager.module_for("https://www.coursera.org/learn/demo/lecture/ddd/deep-dive"),
+            "Module 2",
+        )
+
+    def test_an_unmapped_item_reports_no_module(self):
+        self.assertEqual(self.manager.module_for("/learn/demo/lecture/zzz/stray"), "")
+
+    def test_the_counts_match_the_map(self):
+        self.assertEqual(self.manager.item_count(), 4)
+        self.assertEqual(self.manager.module_count(), 2)
+
+
+class UnfinishedItemTests(CourseManagerTestCase):
+    """What the sidebar says is left, filtered by what the caller will act on."""
+
+    WELCOME = "/learn/demo/lecture/aaa/welcome"
+    SYLLABUS = "/learn/demo/supplement/bbb/syllabus"
+    QUIZ = "/learn/demo/quiz/ccc/practice"
+    DEEP_DIVE = "/learn/demo/lecture/ddd/deep-dive"
+
+    def _hrefs(self, status, skip_labels=()):
+        rows = self.manager.unfinished_items(status, skip_labels=skip_labels)
+        return [href for _title, _label, href, _duration in rows]
+
+    def test_unfinished_rows_come_back_in_course_order(self):
+        status = {self.WELCOME: False, self.SYLLABUS: True, self.DEEP_DIVE: False}
+        self.assertEqual(self._hrefs(status), [self.WELCOME, self.DEEP_DIVE])
+
+    def test_a_row_the_scan_could_not_read_is_not_counted_as_unfinished(self):
+        # Absent is not the same as unfinished; only an explicit False counts.
+        self.assertEqual(self._hrefs({self.WELCOME: True}), [])
+
+    def test_skipped_labels_are_left_out(self):
+        status = {self.WELCOME: True, self.QUIZ: False, self.DEEP_DIVE: False}
+        self.assertEqual(self._hrefs(status, skip_labels={"QUIZ"}), [self.DEEP_DIVE])
+
+    def test_skipping_every_remaining_label_leaves_nothing(self):
+        status = {self.WELCOME: True, self.SYLLABUS: True, self.QUIZ: False}
+        self.assertEqual(self._hrefs(status, skip_labels={"QUIZ"}), [])
+        self.assertEqual(self._hrefs(status), [self.QUIZ])
+
+
+class NextActionableTests(CourseManagerTestCase):
+    """Where a run goes next: the work ahead of it, then the work behind it."""
+
+    WELCOME = "/learn/demo/lecture/aaa/welcome"
+    SYLLABUS = "/learn/demo/supplement/bbb/syllabus"
+    QUIZ = "/learn/demo/quiz/ccc/practice"
+    DEEP_DIVE = "/learn/demo/lecture/ddd/deep-dive"
+
+    def _href(self, status, current_url=None, skip_labels=()):
+        row = self.manager.next_actionable(status, current_url, skip_labels)
+        return None if row is None else row[2]
+
+    def test_with_no_current_item_the_first_unfinished_row_is_chosen(self):
+        status = {self.WELCOME: False, self.SYLLABUS: False}
+        self.assertEqual(self._href(status), self.WELCOME)
+
+    def test_the_item_being_left_is_never_the_answer(self):
+        # The sidebar takes a moment to record a completion, so the item just
+        # finished is routinely still listed as unfinished.
+        status = {self.WELCOME: False, self.SYLLABUS: False}
+        self.assertEqual(self._href(status, current_url=self.WELCOME), self.SYLLABUS)
+
+    def test_work_ahead_is_preferred_to_work_behind(self):
+        status = {self.WELCOME: False, self.DEEP_DIVE: False}
+        self.assertEqual(self._href(status, current_url=self.SYLLABUS), self.DEEP_DIVE)
+
+    def test_work_behind_is_taken_when_there_is_none_ahead(self):
+        # A course picked up part-way has unfinished items behind it, and never
+        # going back would leave them undone for good.
+        status = {self.WELCOME: False, self.DEEP_DIVE: True}
+        self.assertEqual(self._href(status, current_url=self.DEEP_DIVE), self.WELCOME)
+
+    def test_nothing_left_returns_nothing(self):
+        status = {self.WELCOME: True, self.SYLLABUS: True, self.DEEP_DIVE: True}
+        self.assertIsNone(self._href(status, current_url=self.WELCOME))
+
+    def test_skipped_labels_are_not_offered_as_the_next_item(self):
+        status = {self.QUIZ: False, self.DEEP_DIVE: False}
+        self.assertEqual(
+            self._href(status, current_url=self.WELCOME, skip_labels={"QUIZ"}), self.DEEP_DIVE
+        )
+
+    def test_an_unmapped_current_item_still_gets_an_answer(self):
+        # A page outside the map has no position, so everything counts as ahead.
+        status = {self.SYLLABUS: False}
+        self.assertEqual(
+            self._href(status, current_url="/learn/demo/lecture/zzz/stray"), self.SYLLABUS
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
 

@@ -45,16 +45,28 @@ class Settings:
     # rather than wherever the tab happens to be sitting.
     resume_at_incomplete: bool = True
 
+    # How much of the course one run covers, counted from where it starts.
+    # ``None`` on both means the whole thing. They are mutually exclusive.
+    module_limit: int = None
+    item_limit: int = None
+
+    # Write a full-detail log of the run to a file, whatever the console level.
+    run_log: bool = True
+
     # Main-loop pacing.
     idle_poll_seconds: float = 2.0
     settle_seconds: float = 5.0
     stuck_iterations: int = 20
     paused_iterations_before_resume: int = 30
     completion_prompt_timeout: int = 30
+    # Ticks the run may spend without reaching an item it has not been on.
+    stall_iterations: int = 40
 
     def __post_init__(self):
         """Normalises a scalar completion threshold into a range."""
         self.video_completion_threshold = threshold_bounds(self.video_completion_threshold)
+        if self.module_limit is not None and self.item_limit is not None:
+            raise ValueError("--modules and --items limit the same run in two ways; pick one")
 
     def describe(self):
         """Returns a short human-readable summary of the active settings."""
@@ -64,9 +76,15 @@ class Settings:
         reading = "-".join(str(value) for value in self.reading_default_minutes)
         graded = "pause" if self.pause_on_graded else "skip"
         start = "first-unfinished" if self.resume_at_incomplete else "here"
+        if self.item_limit is not None:
+            scope = f"{self.item_limit} items"
+        elif self.module_limit is not None:
+            scope = f"{self.module_limit} modules"
+        else:
+            scope = "whole course"
         return (
             f"threshold={threshold}% seek={seek} reading={reading}m "
-            f"start={start} "
+            f"start={start} scope={scope} "
             f"graded={graded} log={self.log_level}"
         )
 
@@ -121,6 +139,22 @@ def build_parser(description, subcommand=""):
         help="Set the level explicitly. Takes precedence over -v and -q.",
     )
     return parser
+
+
+def global_flags():
+    """Returns each global option mapped to whether it consumes the next token.
+
+    Read off :func:`build_parser` rather than listed by hand. The caller uses
+    this to find where a subcommand name begins among leading flags, and a flag
+    added to the parser but forgotten here would put that boundary one token
+    out -- which is the failure this exists to prevent, reintroduced quietly.
+    An option the parser does not carry is reported as absent rather than as
+    value-less, so a command's own flag typed early is not stepped over.
+    """
+    parser = build_parser("")
+    return {
+        option: action.nargs != 0 for action in parser._actions for option in action.option_strings
+    }
 
 
 def add_course_url_arg(parser):
@@ -221,6 +255,34 @@ def add_automation_args(parser):
         metavar="MIN[-MAX]",
         help="Fallback reading dwell range in minutes (default: 7-12).",
     )
+    # Mutually exclusive: both bound the same run, and honouring the smaller of
+    # the two silently is worse than saying they conflict.
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument(
+        "--modules",
+        type=positive_count,
+        default=None,
+        metavar="N",
+        help=(
+            "Stop after N modules, counted from where the run starts rather "
+            "than from the beginning of the course."
+        ),
+    )
+    scope.add_argument(
+        "--items",
+        type=positive_count,
+        default=None,
+        metavar="N",
+        help="Stop after N items, counted from where the run starts.",
+    )
+    parser.add_argument(
+        "--no-run-log",
+        action="store_true",
+        help=(
+            "Do not write this run's full log to a file. Without this a "
+            "complete DEBUG record is kept whatever the console level is."
+        ),
+    )
     return parser
 
 
@@ -276,6 +338,22 @@ def threshold_bounds(value):
     return percent, percent
 
 
+def positive_count(value):
+    """Parses a count of items or modules, rejecting anything below one.
+
+    Zero and negatives are refused at the command line rather than treated as
+    "no limit": a run asked for nothing would attach, map the course and stop
+    without touching an item, which reads as a failure rather than as obedience.
+    """
+    try:
+        count = int(str(value).strip())
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("expected a whole number, for example 3") from exc
+    if count < 1:
+        raise argparse.ArgumentTypeError("expected a count of 1 or more")
+    return count
+
+
 def parse_reading_minutes(value):
     """Parses a positive ``MIN`` or ordered ``MIN-MAX`` minute range."""
     parts = str(value).strip().split("-")
@@ -302,4 +380,7 @@ def settings_from_args(args):
         pause_on_graded=getattr(args, "pause_on_graded", False),
         resume_at_incomplete=not getattr(args, "no_resume", False),
         course_url=getattr(args, "url", "") or "",
+        module_limit=getattr(args, "modules", None),
+        item_limit=getattr(args, "items", None),
+        run_log=not getattr(args, "no_run_log", False),
     )

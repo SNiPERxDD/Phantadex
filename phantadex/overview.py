@@ -13,7 +13,6 @@ changed in one place, is caught by ``tests/test_cli.py`` instead of quietly
 leaving this page wrong.
 """
 
-import re
 import textwrap
 
 from . import REPOSITORY_URL, __version__, config, course_manager, handlers, logs, schema
@@ -21,7 +20,7 @@ from . import REPOSITORY_URL, __version__, config, course_manager, handlers, log
 # Ordered as a reader meets them: look at the course, then run it, then the
 # narrower tools. ``cli`` takes its command list from these keys.
 COMMAND_SUMMARIES = {
-    "dex": "Print the course tree with each item's type, length and completion state.",
+    "dex": "Print the course tree, splitting what is left to Phantadex from what is left to you.",
     "skip": "Seek the video in the active tab once, without starting a run.",
     "watch": "Work through the course from the first unfinished item. The main command.",
     "archive": "Visit every mapped video and reading for their text alone, in bulk.",
@@ -60,12 +59,9 @@ MAX_PAGE_WIDTH = 80
 # it: an escape sequence occupies no columns, but ``len`` counts it. Rules are
 # sized against the lines above them and the two-column layout is padded by
 # hand, and both would be thrown out by the codes alone.
-_ANSI = re.compile(r"\x1b\[[0-9;]*m")
-
-
 def visible_width(text):
     """Returns the columns ``text`` occupies, discounting any colour codes."""
-    return len(_ANSI.sub("", text))
+    return len(logs.strip_ansi(text))
 
 
 def _paint(method, text):
@@ -159,8 +155,15 @@ def render():
         _paint("dim", f"    {program} https://www.coursera.org/learn/<course>/lecture/<id>/<slug>"),
         _paint("dim", f"    {program} watch /learn/<course>/home/week/1"),
         "",
-        "  A run still starts at the first unfinished item; add --no-resume to",
-        "  start on the item named instead.",
+        "  A run moves between the items it has work on, not between adjacent",
+        "  rows: it starts at the first unfinished one and, each time it finishes,",
+        "  reads the sidebar and goes straight to the next -- so finished items",
+        "  are never opened to be skipped. Graded work and surveys are stepped",
+        "  past, so a course with nothing else left is finished as far as a run",
+        "  is concerned, and it stops there. Add --no-resume to start on the item",
+        "  named and let the platform's Next button do the moving.",
+        "  --modules N and --items N bound how far it goes: N counted from where",
+        "  the run starts, then it stops.",
         "",
         *_heading("GETTING STARTED"),
         *_rows(
@@ -194,6 +197,9 @@ def render():
         f"  {_paint('cyan', f'<state directory>/{schema.STATE_FILE_NAME}')}",
         "      Selectors 'discover' proved against the live site, layered over the ones",
         f"      shipped with the package. Set {schema.STATE_DIR_ENV} to relocate it.",
+        f"  {_paint('cyan', f'<state directory>/{logs.RUN_LOG_DIR_NAME}/')}",
+        "      One file per run, in full detail whatever the console was asked to show.",
+        f"      The {logs.RUN_LOG_KEEP} most recent are kept; --no-run-log writes none.",
         "",
         *_heading("NEVER DOES"),
         *[f"  {_paint('red', '-')} {line}" for line in _NEVER],

@@ -63,6 +63,59 @@ class ExtractTranscriptTests(unittest.TestCase):
             self.assertEqual(page_ops.extract_transcript(self.page), (None, "FAILED"))
 
 
+class ExtractReadingTests(unittest.TestCase):
+    """A reading is its prose *and* the addresses its prose points at."""
+
+    def _extract(self, text, links=None):
+        body = FakeLocator(count=1, text=text, links=links or [])
+        page = FakePage(url="/learn/c/supplement/aaa/one")
+        with mock.patch.object(page_ops.schema, "first_visible", return_value=body):
+            return page_ops.extract_reading(page)
+
+    def test_prose_without_links_is_returned_as_before(self):
+        body = "A reading long enough to keep."
+        self.assertEqual(self._extract(body), body)
+
+    def test_a_download_only_reading_keeps_the_file_url(self):
+        # The failure this exists for: the body is one attachment link, so
+        # ``inner_text`` archived four words and threw the file away.
+        result = self._extract(
+            "Course-Diagram\nPPTX File",
+            [("Course-Diagram PPTX File", "https://cdn/Course-Diagram.pptx")],
+        )
+        self.assertIn("https://cdn/Course-Diagram.pptx", result)
+
+    def test_a_resource_list_keeps_every_address(self):
+        result = self._extract(
+            "Optional resources.\nTesla\nGoPro",
+            [("Tesla", "https://tesla.com"), ("GoPro", "https://gopro.com")],
+        )
+        self.assertIn("https://tesla.com", result)
+        self.assertIn("https://gopro.com", result)
+
+    def test_a_body_too_short_even_with_its_links_is_refused(self):
+        self.assertIsNone(self._extract("Hi", []))
+
+    def test_a_short_body_carrying_a_link_is_kept(self):
+        self.assertIsNotNone(self._extract("Slides", [("Slides", "https://cdn/deck.pptx")]))
+
+    def test_a_link_walk_that_fails_still_returns_the_prose(self):
+        body = FakeLocator(count=1, text="A reading long enough to keep.")
+        body.evaluate = mock.Mock(side_effect=RuntimeError("detached"))
+        page = FakePage(url="/learn/c/supplement/aaa/one")
+        with mock.patch.object(page_ops.schema, "first_visible", return_value=body):
+            self.assertEqual(page_ops.extract_reading(page), "A reading long enough to keep.")
+
+    def test_a_missing_body_reports_the_selector_as_stale(self):
+        page = FakePage(url="/learn/c/supplement/aaa/one")
+        with (
+            mock.patch.object(page_ops.schema, "first_visible", return_value=None),
+            mock.patch.object(page_ops.schema, "report_stale") as stale,
+        ):
+            self.assertIsNone(page_ops.extract_reading(page))
+        stale.assert_called_once()
+
+
 class TranscriptDownloadTests(unittest.TestCase):
     """The Downloads tab is absent on some courses; the code must not assume it."""
 

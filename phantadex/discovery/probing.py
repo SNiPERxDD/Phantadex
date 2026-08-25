@@ -15,7 +15,7 @@ from datetime import datetime
 
 import yaml
 
-from .. import logs, schema
+from .. import logs, page_ops, schema
 from ..element_schema import ELEMENTS_SCHEMA
 from . import context, rules
 
@@ -291,6 +291,12 @@ def discover_selectors(page, state):
     findings = _seed_findings(schema.state_selectors())
     wanted = categories_to_scan(page_type)
     pending_updates = False
+    unmatched = []
+
+    if "transcript" in wanted:
+        # The panel starts collapsed, and a collapsed panel shows the toggle
+        # while hiding the body. Probing it shut verified the button.
+        page_ops.open_transcript_panel(page)
 
     for category, elements in ELEMENTS_SCHEMA.items():
         if category not in wanted:
@@ -301,6 +307,11 @@ def discover_selectors(page, state):
         for el_name, el_info in elements.items():
             selector, location_type = _probe_element(page, el_info)
             if not selector:
+                # Every shipped selector missed. This pass cannot repair that --
+                # it re-ranks what the package ships, it does not invent markup
+                # -- but silence here is how "no changes needed" came to mean
+                # "nothing was found", which are opposite reports.
+                unmatched.append(f"{category}.{el_name}")
                 continue
 
             # Compared against the effective value (state over packaged), so a
@@ -328,9 +339,11 @@ def discover_selectors(page, state):
             known[el_name] = _with_alternatives(selector, known.get(el_name))
             pending_updates = True
 
+    if unmatched:
+        logs.warn(f"no selector matched for: {', '.join(unmatched)}")
     if pending_updates:
         _save_findings(findings)
-    else:
+    elif not unmatched:
         logs.ok("selectors are stable; no changes needed")
 
     # The merged view, not the learned state alone. ``findings`` is seeded from

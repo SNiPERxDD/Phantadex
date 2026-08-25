@@ -8,16 +8,27 @@ import re
 
 from .. import detection
 
-# Core types we aim to verify, but we'll filter this based on actual course content
-CORE_TYPES = ["VIDEO", "READING", "QUIZ", "ASSIGNMENT", "LAB", "UNGRADED_PLUGIN"]
-
-# Items to ignore when marking types as 'discovered'
-FILLER_KEYWORDS = [
-    "how was the course",
-    "course farewell",
-    "please tell us about yourself",
-    "survey",
+# Types a pass tries to reach before it calls the course covered. Narrowed
+# against the course's own outline, so naming a type the course does not
+# contain costs nothing and omitting one it does contain is what hurts:
+# DIALOGUE and DISCUSSION were missing, which is why the ``dialogue`` selector
+# category had never been probed on any course -- the pass ended before it had
+# a reason to visit one.
+CORE_TYPES = [
+    "VIDEO",
+    "READING",
+    "QUIZ",
+    "ASSIGNMENT",
+    "LAB",
+    "UNGRADED_PLUGIN",
+    "DIALOGUE",
+    "DISCUSSION",
 ]
+
+# Titles that mark a page as filler rather than course content. Read from the
+# classifier so a page this pass skips is exactly the page a run steps past;
+# the hand-written copy that used to live here had already drifted from it.
+FILLER_KEYWORDS = detection.SURVEY_TITLES + ("course farewell",)
 
 
 def _segment_markers():
@@ -58,6 +69,14 @@ def detect_page_type(page):
     url = page.url.lower()
     title = page.title().lower()
 
+    # Ahead of the segment, exactly as ``detection.classify`` orders it, and for
+    # the same reason: a survey is served as a supplement or a widget, so the
+    # segment names its container rather than what the page asks for. Reading
+    # the segment first scanned every survey as a reading -- the one answer a
+    # run arriving on that same page will never give.
+    if any(phrase in title for phrase in detection.SURVEY_TITLES):
+        return "FILLER"
+
     # Core technical markers based on the URL segment, tried before the title.
     for page_type, segments in URL_SEGMENT_MARKERS:
         if any(segment in url for segment in segments):
@@ -95,11 +114,6 @@ SUBTEXT_TYPES = (
     ("dialogue", "DIALOGUE"),
     ("discussion", "DISCUSSION"),
 )
-
-# A filler keyword only overrides a real content type for an explicit survey --
-# a "Congratulations Video" is still a video and must count for discovery.
-FILLER_OVERRIDES = ("survey", "how was the course")
-
 
 # Screen-reader prefixes Coursera puts ahead of the type in a row's aria-label.
 LABEL_PREFIXES = ("selected link", "link")
@@ -143,13 +157,21 @@ def classify_sidebar_row(subtext, label, href):
 def apply_filler_override(item_type, text, subtext):
     """Downgrades a row to ``FILLER`` when its *title* marks it a survey.
 
-    Only the title is checked for the survey marker, which is the long-standing
-    behaviour: a row whose subtext alone says "survey" keeps its content type.
+    The titles are :data:`detection.SURVEY_TITLES` -- the same list the
+    classifier uses on the open page -- so a row the map calls ``FILLER`` is
+    exactly the row a run will call ``SURVEY`` when it arrives on it. They used
+    to be separate lists, and the disagreement was expensive: "Welcome! Please
+    Tell Us About Yourself" was mapped ``UNGRADED_PLUGIN``, so a run picked it
+    as the first thing left to do, navigated to it, and only then recognised a
+    survey and stepped past it.
+
+    Only the title is checked, which is the long-standing behaviour and the
+    reason the phrases are whole ones: a row whose *subtext* says "survey", and
+    a reading titled "A Survey of Reinforcement Learning", are both course
+    content and keep their type.
     """
-    blob = f"{text} {subtext}".lower()
-    if not any(keyword in blob for keyword in FILLER_KEYWORDS):
-        return item_type
-    if any(marker in text.lower() for marker in FILLER_OVERRIDES):
+    title = (text or "").lower()
+    if any(phrase in title for phrase in detection.SURVEY_TITLES):
         return "FILLER"
     return item_type
 

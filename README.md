@@ -295,9 +295,11 @@ source. Both entry points share the connection flags:
 *   `--transcript-dir` — root archive directory (default `phantadex_archive`).
     The default is relative, so `pdex watch` and `pdex archive` create it inside
     the directory they are launched from; pass an absolute path to keep one
-    archive regardless of where the command runs. `pdex dex`, `pdex skip` and
-    `pdex discover` write nothing there — verified selectors always go to the
-    platform state directory (`PHANTADEX_STATE_DIR` overrides it).
+    archive regardless of where the command runs. `pdex dex` reads the ledger there
+    to tell an item it has already archived from one it has not, but writes
+    nothing; `pdex skip` and `pdex discover` neither read nor write it. Verified
+    selectors always go to the platform state directory (`PHANTADEX_STATE_DIR`
+    overrides it).
 *   `-v`, `--verbose` — log every browser action: each click (with the label of
     the control it hit and its coordinates), each scroll, each seek, each
     navigation, plus the per-selector failures that are otherwise silent. This
@@ -327,6 +329,11 @@ source. Both entry points share the connection flags:
 *   `--no-resume` — start on whichever item the tab is showing. Without the flag
     the run jumps once, on attach, to the first item the sidebar does not mark
     complete, instead of stepping through finished work to reach it.
+*   `--items N` — stop after N items, counted from where the run starts rather
+    than from the top of the course. An item is one thing to sit through, so a
+    peer assignment listed as two sidebar rows counts once.
+*   `--modules N` — stop after N modules, counted the same way. A row the map
+    does not name belongs to no module and is never the reason a run ends.
 
 `pdex skip` accepts `--video-skip-range` and uses the same random range parser
 as Watch; seeking is the whole point of that command, so it always seeks.
@@ -425,7 +432,9 @@ python run_tests.py --live   # additionally probe a running Chrome session
     from the active sidebar row. If neither is readable the dwell falls back to
     `--reading-minutes` (randomized over `7-12` by default).
 *   **Locked/Empty Content Panes:** Locked items retreat to their required
-    previous item. A missing reading body is retried through the bounded handler
+    previous item -- unless the map places the item last, because a course's
+    final screen renders no Next control either, and retreating from it sent the
+    run in circles until the stall guard ended it. A missing reading body is retried through the bounded handler
     policy and never treated as a scrollable reading. Scrolling is limited to an
     overflowing ancestor of the reading body; short readings dwell without wheel
     input, stop at the bottom, and exit immediately if the active item changes.

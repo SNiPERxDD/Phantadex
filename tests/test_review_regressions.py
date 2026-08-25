@@ -5,6 +5,8 @@ caught, so a future change cannot quietly reintroduce it.
 """
 
 import argparse
+import contextlib
+import io
 import os
 import tempfile
 import unittest
@@ -12,6 +14,7 @@ import xml.etree.ElementTree as ET
 from unittest import mock
 
 from phantadex import (
+    cli,
     config,
     course_manager,
     detection,
@@ -19,8 +22,11 @@ from phantadex import (
     element_schema,
     handlers,
     interaction,
+    limits,
     modals,
     navigation,
+    page_ops,
+    progress,
     runner,
     schema,
     storage,
@@ -28,7 +34,7 @@ from phantadex import (
     video,
 )
 from phantadex.course_manager import CourseManager
-from phantadex.discovery import context, course_map, probing, rules
+from phantadex.discovery import context, course_map, observation, probing, rules
 from phantadex.discovery.state import ObservationState
 from tests.fakes import FakeLocator, FakePage, capture_console
 
@@ -634,7 +640,7 @@ class SeekEventTests(unittest.TestCase):
         # timeupdate itself. The extra dispatched timeupdate was redundant, and
         # was the only event on the page with isTrusted false.
         self.assertNotIn("dispatchEvent", video._SEEK_JS)
-        self.assertIn("video.currentTime = targetSeconds", video._SEEK_JS)
+        self.assertIn("node.currentTime = targetSeconds", video._SEEK_JS)
 
 
 # The first selector the schema lists for the timeline. Taking it from the
@@ -891,3 +897,497 @@ class PauseControlTests(unittest.TestCase):
             },
         )
         self.assertFalse(video.pause_if_playing(page))
+
+
+class ReadOnlyLedgerTests(unittest.TestCase):
+    """`pdex dex` reads the ledger; it must not bring one into existence."""
+
+    def test_a_read_only_manager_creates_nothing_on_disk(self):
+        course_map_data = {"Week 1": [("Intro", "VIDEO", ITEM_A, "5 min")]}
+        with tempfile.TemporaryDirectory() as root:
+            manager = CourseManager(course_map_data, "Demo", root_dir=root, read_only=True)
+            self.assertFalse(os.path.exists(manager.root_dir))
+            self.assertFalse(os.path.exists(manager.xml_path))
+            # The question it exists to answer is still answerable.
+            self.assertFalse(manager.is_archived(ITEM_A))
+            self.assertEqual(manager.archived_paths(), set())
+            self.assertEqual(os.listdir(root), [])
+
+    def test_a_writing_manager_still_prepares_the_ledger(self):
+        course_map_data = {"Week 1": [("Intro", "VIDEO", ITEM_A, "5 min")]}
+        with tempfile.TemporaryDirectory() as root:
+            manager = CourseManager(course_map_data, "Demo", root_dir=root)
+            self.assertTrue(os.path.exists(manager.xml_path))
+
+    def test_a_read_only_manager_reads_a_ledger_another_run_wrote(self):
+        course_map_data = {"Week 1": [("Intro", "VIDEO", ITEM_A, "5 min")]}
+        with tempfile.TemporaryDirectory() as root:
+            writer = CourseManager(course_map_data, "Demo", root_dir=root)
+            writer.save_content(ITEM_A, "A transcript long enough to keep.", "transcript")
+            reader = CourseManager(course_map_data, "Demo", root_dir=root, read_only=True)
+            self.assertTrue(reader.is_archived(ITEM_A))
+
+
+class PeerReviewIsGradedTests(unittest.TestCase):
+    """Both halves of a peer assignment are the user's work, not one of them."""
+
+    def test_the_reviewing_half_is_named_as_graded(self):
+        self.assertIn("REVIEW_PEERS", progress.GRADED_LABELS)
+        self.assertLessEqual(progress.GRADED_LABELS, progress.SKIPPED_LABELS)
+
+    def test_pausing_on_graded_waits_on_the_review_as_well_as_the_submission(self):
+        watch = runner.Runner(config.Settings(pause_on_graded=True))
+        remaining = watch._skipped_labels()
+        self.assertNotIn("REVIEW_PEERS", remaining)
+        self.assertNotIn(detection.PEER_REVIEW, remaining)
+
+
+class EmptyReadingBodyTests(unittest.TestCase):
+    """A body that rendered nothing is a failure, whatever it links to."""
+
+    def test_links_do_not_carry_an_empty_body_past_the_length_check(self):
+        body = FakeLocator(text="   \n  ", links=[("Slides", "https://example.test/deck.pptx")])
+        with mock.patch.object(schema, "first_visible", return_value=body):
+            self.assertIsNone(page_ops.extract_reading(FakePage(url=ITEM_A)))
+
+    def test_a_download_button_is_still_kept_by_its_link(self):
+        body = FakeLocator(text="Download", links=[("Slides", "https://example.test/deck.pptx")])
+        with mock.patch.object(schema, "first_visible", return_value=body):
+            text = page_ops.extract_reading(FakePage(url=ITEM_A))
+        self.assertIn("https://example.test/deck.pptx", text)
+
+
+class BudgetUnitTests(unittest.TestCase):
+    """The item budget spends the unit the run quoted when it started."""
+
+    def test_two_rows_of_one_peer_assignment_spend_one_item(self):
+        budget = limits.Budget(items=1)
+        submit = "/learn/demo/peer/AbCd/case-study"
+        review = "/learn/demo/peer/AbCd/review-classmates"
+        self.assertTrue(budget.admits(urls.item_id(submit), ""))
+        # Same item id, different row: it is the item already being paid for.
+        self.assertTrue(budget.admits(urls.item_id(review), ""))
+        self.assertFalse(budget.admits(urls.item_id("/learn/demo/lecture/Zz/next"), ""))
+
+    def test_an_unmapped_item_does_not_spend_a_module(self):
+        budget = limits.Budget(modules=1)
+        self.assertTrue(budget.admits("a", "Week 1"))
+        # No module name means the map has not caught up with this row. Ending
+        # the run on it would stop a bound that still had a module to give.
+        self.assertTrue(budget.admits("b", ""))
+        self.assertFalse(budget.admits("c", "Week 2"))
+
+
+class FlagFirstDispatchTests(unittest.TestCase):
+    """A global flag typed before the command must not swallow the command.
+
+    ``pdex -v watch`` used to reach the default command, whose optional URL then
+    took ``watch`` -- and that command opens whatever URL it is handed, so the
+    user's own course tab was navigated to ``/watch`` and their place was gone.
+    """
+
+    def _dispatch(self, argv):
+        seen = {}
+
+        def record(name):
+            def run(args):
+                seen["command"] = name
+                seen["args"] = list(args)
+                return 0
+
+            return run
+
+        with (
+            mock.patch.object(cli, "dex_main", record("dex")),
+            mock.patch.object(cli.watch, "main", record("watch")),
+            mock.patch.object(cli.archive, "main", record("archive")),
+        ):
+            code = cli.main(argv)
+        return code, seen
+
+    def test_a_flag_before_the_command_still_reaches_the_command(self):
+        code, seen = self._dispatch(["-v", "watch"])
+        self.assertEqual(code, 0)
+        self.assertEqual(seen["command"], "watch")
+        self.assertEqual(seen["args"], ["-v"])
+
+    def test_a_flag_that_takes_a_value_is_stepped_over(self):
+        _code, seen = self._dispatch(["--log-level", "DEBUG", "archive"])
+        self.assertEqual(seen["command"], "archive")
+        self.assertEqual(seen["args"], ["--log-level", "DEBUG"])
+
+    def test_a_directory_named_like_a_command_is_still_a_directory(self):
+        _code, seen = self._dispatch(["--transcript-dir", "watch"])
+        self.assertEqual(seen["command"], "dex")
+        self.assertEqual(seen["args"], ["--transcript-dir", "watch"])
+
+    def test_an_unknown_word_after_a_flag_is_refused_not_opened(self):
+        with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            code, seen = self._dispatch(["-v", "bogus"])
+        self.assertEqual(code, 2)
+        self.assertEqual(seen, {})
+        self.assertIn("bogus", stderr.getvalue())
+
+
+class LedgerCharacterTests(unittest.TestCase):
+    """The writer must not be able to produce a file the reader will quarantine.
+
+    ElementTree passes XML-1.0-illegal characters straight through; the next
+    read raises ParseError, and an unreadable ledger is quarantined and rebuilt
+    empty -- so one vertical tab in a sidebar title costs every archived entry.
+    """
+
+    def _manager(self, course_map_rows):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        return CourseManager(course_map_rows, "Course", root_dir=directory.name)
+
+    def test_a_control_character_in_a_title_leaves_the_ledger_readable(self):
+        manager = self._manager({"Week 1": [("Bad\x0bTitle", "READING", ITEM_B, "5 min")]})
+        manager.save_content(ITEM_B, "Body text.", "Reading")
+        item = ET.parse(manager.xml_path).getroot().find(".//item")
+        self.assertEqual(item.get("title"), "BadTitle")
+
+    def test_a_failure_reason_is_stripped_the_same_way(self):
+        manager = self._manager({"Week 1": [("Title", "READING", ITEM_B, "5 min")]})
+        self.assertTrue(manager.mark_failed(ITEM_B, "broke\x0chere"))
+        item = ET.parse(manager.xml_path).getroot().find(".//item")
+        self.assertEqual(item.get("failure_reason"), "brokehere")
+
+    def test_body_text_is_cleaned_on_the_way_into_the_ledger(self):
+        manager = self._manager({"Week 1": [("Title", "READING", ITEM_B, "5 min")]})
+        manager.save_content(ITEM_B, "before\x0bafter", "Reading")
+        content = ET.parse(manager.xml_path).getroot().find(".//content")
+        self.assertEqual(content.text, "beforeafter")
+
+    def test_a_lone_surrogate_is_stripped_too(self):
+        # Not reachable from scraped text -- a surrogate cannot survive the
+        # UTF-8 write of the .txt file that precedes the ledger entry -- but an
+        # exception message reaches `mark_failed` without passing through one.
+        manager = self._manager({"Week 1": [("Title", "READING", ITEM_B, "5 min")]})
+        self.assertTrue(manager.mark_failed(ITEM_B, "broke\ud800here"))
+        item = ET.parse(manager.xml_path).getroot().find(".//item")
+        self.assertEqual(item.get("failure_reason"), "brokehere")
+
+
+class FailureIsRecordedForEveryTypeTests(unittest.TestCase):
+    """Giving up must not look like success, whatever the item's type.
+
+    The ledger only lists the archivable types, so a lab or a plugin that failed
+    three times matched no entry and left a debug line as its only trace.
+    """
+
+    def _manager(self, item_type):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        rows = {"Week 1": [("Lab Thing", item_type, ITEM_B, "")]}
+        return CourseManager(rows, "Course", root_dir=directory.name)
+
+    def test_an_unarchivable_item_is_adopted_so_the_failure_is_kept(self):
+        manager = self._manager("PLUGIN")
+        self.assertTrue(manager.mark_failed(ITEM_B, "three strikes"))
+        self.assertEqual(manager.failed_paths(), {urls.normalize_path(ITEM_B)})
+        item = ET.parse(manager.xml_path).getroot().find(".//item")
+        self.assertEqual(item.get("type"), "PLUGIN")
+        self.assertEqual(item.get("title"), "Lab Thing")
+
+    def test_an_unmapped_item_is_filed_under_the_catch_all_module(self):
+        manager = self._manager("PLUGIN")
+        stranger = "/learn/demo/ungradedLab/zzz/stray"
+        self.assertTrue(manager.mark_failed(stranger, "gave up"))
+        self.assertIn(urls.normalize_path(stranger), manager.failed_paths())
+
+    def test_archiving_the_item_later_clears_the_failure(self):
+        manager = self._manager("READING")
+        manager.mark_failed(ITEM_B, "gave up")
+        manager.save_content(ITEM_B, "Body text.", "Reading")
+        self.assertEqual(manager.failed_paths(), set())
+
+
+class LastItemIsNotALockTests(unittest.TestCase):
+    """The final item of a course renders no Next control, and neither does a lock.
+
+    Read as a lock it sent the run backwards: retreat, get skipped forward,
+    arrive nowhere new, until the stall guard ended a run that had finished.
+    """
+
+    class _Manager:
+        def __init__(self, mapped, next_url):
+            self._mapped = mapped
+            self._next_url = next_url
+
+        def is_mapped(self, _url):
+            return self._mapped
+
+        def get_next_url(self, _url):
+            return self._next_url
+
+    def _retreated(self, manager):
+        watcher = runner.Runner(config.Settings())
+        watcher.ctx.manager = manager
+        with (
+            mock.patch.object(runner.page_ops, "is_locked_item", return_value=True),
+            mock.patch.object(runner, "navigation") as nav,
+            mock.patch.object(runner, "modals"),
+            mock.patch.object(runner.detection, "classify", return_value=detection.UNKNOWN),
+            mock.patch.object(watcher, "_log_context"),
+        ):
+            watcher._tick(FakePage(url=ITEM_A))
+            return nav.retreat.called
+
+    def test_a_mapped_last_item_is_not_retreated_from(self):
+        self.assertFalse(self._retreated(self._Manager(mapped=True, next_url=None)))
+
+    def test_a_genuine_lock_still_retreats(self):
+        self.assertTrue(self._retreated(self._Manager(mapped=True, next_url=ITEM_B)))
+
+    def test_an_unmapped_item_is_never_called_the_last_one(self):
+        # A slow lazy-load produces the same silence as the end of the course.
+        self.assertTrue(self._retreated(self._Manager(mapped=False, next_url=None)))
+
+
+class DiscoveryDoesNotSpinOrLieTests(unittest.TestCase):
+    """A pass that cannot move must say so, and an empty read is not success."""
+
+    class _Context:
+        def __init__(self, page):
+            self.pages = [page]
+
+    def test_an_empty_sidebar_does_not_empty_the_exit_targets(self):
+        state = ObservationState()
+        state.mapped = True
+        state.required_types = {"VIDEO", "READING"}
+        with (
+            mock.patch.object(course_map, "get_detailed_course_map", return_value={}),
+            mock.patch.object(context, "get_robust_course_name", return_value="Course"),
+        ):
+            observation.get_sidebar_targets(FakePage(url=ITEM_A), state)
+        self.assertEqual(state.required_types, {"VIDEO", "READING"})
+
+    def test_a_hop_that_never_moves_closes_the_pass_instead_of_polling_forever(self):
+        state = ObservationState()
+        state.mapped = True
+        state.required_types = {"VIDEO"}
+        page = FakePage(url=ITEM_A)
+        with (
+            mock.patch.object(observation, "STILL_TICKS", 3),
+            mock.patch.object(observation, "time"),
+            mock.patch.object(probing, "discover_selectors", return_value={}),
+            mock.patch.object(observation, "auto_hop_smart", return_value=True),
+            capture_console() as console,
+        ):
+            observation._observe(self._Context(page), state)
+        self.assertIn("not advancing", console.getvalue())
+
+
+class DiscoveryClassifiesLikeTheRunTests(unittest.TestCase):
+    """Discovery must give the same answer the run will give on the same page.
+
+    A survey is served under a supplement segment, so reading the segment first
+    scanned every survey as a reading and probed the wrong selector categories.
+    """
+
+    def test_a_survey_served_as_a_supplement_is_not_scanned_as_a_reading(self):
+        page = FakePage(
+            url="https://www.coursera.org/learn/demo/supplement/xyz/exit-survey",
+            title="Exit Survey | Coursera",
+        )
+        self.assertEqual(rules.detect_page_type(page), "FILLER")
+        self.assertEqual(detection.classify(page), detection.SURVEY)
+
+    def test_an_ordinary_supplement_is_still_a_reading(self):
+        page = FakePage(
+            url="https://www.coursera.org/learn/demo/supplement/xyz/glossary",
+            title="Glossary | Coursera",
+        )
+        self.assertEqual(rules.detect_page_type(page), "READING")
+
+
+class ReadOnlyMovesNothingTests(unittest.TestCase):
+    """Printing a course tree must not relocate the user's archive.
+
+    The legacy-directory migration ran above the read-only guard, so ``pdex
+    dex`` -- which asks the ledger only which items are archived -- created a
+    directory and moved another one to answer the question.
+    """
+
+    MAP = {"Week 1": [("Intro", "VIDEO", ITEM_A, "5 min")]}
+
+    def _legacy_tree(self, stack):
+        root = stack.enter_context(tempfile.TemporaryDirectory())
+        new_root = os.path.join(root, "phantadex")
+        legacy_root = os.path.join(root, "legacy")
+        legacy_course = os.path.join(legacy_root, "Demo_Course")
+        os.makedirs(legacy_course)
+        open(os.path.join(legacy_course, "kept.txt"), "w").close()
+        stack.enter_context(mock.patch.object(course_manager.config, "TRANSCRIPT_DIR", new_root))
+        stack.enter_context(mock.patch.object(course_manager, "LEGACY_TRANSCRIPT_DIR", legacy_root))
+        return new_root, legacy_course
+
+    def test_a_reader_leaves_a_legacy_archive_where_it_found_it(self):
+        with contextlib.ExitStack() as stack:
+            new_root, legacy_course = self._legacy_tree(stack)
+            CourseManager(self.MAP, "Demo Course", root_dir=new_root, read_only=True)
+            self.assertTrue(os.path.exists(legacy_course))
+            self.assertFalse(os.path.exists(new_root))
+
+    def test_a_run_still_migrates_it(self):
+        with contextlib.ExitStack() as stack:
+            new_root, legacy_course = self._legacy_tree(stack)
+            CourseManager(self.MAP, "Demo Course", root_dir=new_root)
+            self.assertFalse(os.path.exists(legacy_course))
+            self.assertTrue(os.path.exists(os.path.join(new_root, "Demo_Course", "kept.txt")))
+
+
+class _MapOnlyManager:
+    """A manager exposing only what the closing report reads."""
+
+    def __init__(self, course_map):
+        self.course_map = course_map
+        self._flat_paths = CourseManager._flatten_map(self)
+
+    def is_archived(self, _href):
+        return False
+
+    unfinished_items = CourseManager.unfinished_items
+    next_actionable = CourseManager.next_actionable
+    awaiting_your_post = CourseManager.awaiting_your_post
+    _archived_quietly = CourseManager._archived_quietly
+    _match_indices = CourseManager._match_indices
+
+
+class HalfReadSidebarIsNotACompleteCourseTests(unittest.TestCase):
+    """A reading cut short must not be announced as a finished course.
+
+    ``get_completion_status`` returns whatever it had collected when a row went
+    stale under it, and a dict cut off at the top lists nothing unfinished --
+    which ended a barely-started run on "already complete".
+    """
+
+    COURSE = "https://www.coursera.org/learn/c"
+    ROWS = [
+        ("Intro", "VIDEO", f"{COURSE}/lecture/aaa/intro", "5 min"),
+        ("Notes", "READING", f"{COURSE}/supplement/bbb/notes", "10 min"),
+        ("Wrap", "VIDEO", f"{COURSE}/lecture/ccc/wrap", "4 min"),
+    ]
+
+    def _finish(self, status):
+        run = runner.Runner(config.Settings())
+        run.ctx.manager = _MapOnlyManager({"Week 1": list(self.ROWS)})
+        page = FakePage(url=self.ROWS[0][2])
+        with (
+            mock.patch.object(runner, "get_completion_status", return_value=status),
+            mock.patch.object(runner.time, "sleep"),
+            capture_console() as console,
+        ):
+            outcome = run._resume_or_finish(page)
+        return outcome, console.getvalue()
+
+    def test_rows_the_reading_never_reached_are_reported_rather_than_assumed(self):
+        status = {urls.normalize_path(self.ROWS[0][2]): True}
+        outcome, console = self._finish(status)
+        self.assertEqual(outcome, runner.STOPPED)
+        self.assertIn("2 rows could not be read", console)
+        self.assertNotIn("already complete", console)
+
+    def test_a_whole_reading_still_ends_on_the_plain_verdict(self):
+        status = {urls.normalize_path(href): True for _t, _l, href, _d in self.ROWS}
+        outcome, console = self._finish(status)
+        self.assertEqual(outcome, runner.STOPPED)
+        self.assertIn("already complete", console)
+
+    def test_one_unread_row_is_counted_in_the_singular(self):
+        status = {urls.normalize_path(href): True for _t, _l, href, _d in self.ROWS[:2]}
+        _outcome, console = self._finish(status)
+        self.assertIn("1 row could not be read", console)
+
+
+class TheLedgerIsReadOnlyWhereItDecidesTests(unittest.TestCase):
+    """The split must not open the ledger for rows the ledger cannot settle.
+
+    ``owner`` consults the archive only for the self-submitted labels, but the
+    check ran for every unfinished row -- and the tree counts each row twice,
+    once for its module and once for the course.
+    """
+
+    def _split(self, label):
+        href = f"https://www.coursera.org/learn/c/quiz/aaa/{label.lower()}"
+        rows = [("Item", label, href, "")]
+        asked = []
+
+        def is_archived(url):
+            asked.append(url)
+            return True
+
+        counts = progress.split(rows, {urls.normalize_path(href): False}, is_archived)
+        return counts, asked
+
+    def test_a_graded_row_is_settled_without_the_ledger(self):
+        counts, asked = self._split("QUIZ")
+        self.assertEqual(asked, [])
+        self.assertEqual(counts.yours, 1)
+
+    def test_a_discussion_still_asks(self):
+        counts, asked = self._split("DISCUSSION")
+        self.assertEqual(len(asked), 1)
+        self.assertEqual(counts.yours, 1)
+
+
+class OptionsMeantForACommandTests(unittest.TestCase):
+    """A command's own flag typed early must be named, not stepped over.
+
+    ``pdex --items 5 watch`` walked past the unknown option, landed on its
+    value, and reported the unknown command ``'5'`` -- true, and no help at all.
+    """
+
+    def _run(self, argv):
+        stderr = io.StringIO()
+        with mock.patch.object(cli.sys, "stderr", stderr):
+            code = cli.main(argv)
+        return code, stderr.getvalue()
+
+    def test_an_unknown_option_is_reported_as_an_option(self):
+        code, error = self._run(["--items", "5", "watch"])
+        self.assertEqual(code, 2)
+        self.assertIn("unknown option '--items' before the command", error)
+        self.assertIn("options go after its name", error)
+        self.assertNotIn("unknown command", error)
+
+    def test_a_global_flag_written_with_an_equals_sign_is_not_double_counted(self):
+        flags = config.global_flags()
+        self.assertEqual(cli._resolve_flag("--transcript-dir=/x", flags), (True, False))
+        self.assertEqual(cli._resolve_flag("--transcript-dir", flags), (True, True))
+
+    def test_an_unambiguous_prefix_is_accepted_the_way_argparse_accepts_it(self):
+        flags = config.global_flags()
+        self.assertEqual(cli._resolve_flag("--transcript-di", flags), (True, True))
+        self.assertEqual(cli._resolve_flag("--nonsense", flags), (False, False))
+
+
+class SilenceIsNotADriftedSelectorTests(unittest.TestCase):
+    """A video with no transcript must not spend the run's one stale warning.
+
+    ``report_stale`` speaks once per element per run, so a video that simply
+    offers no transcript silenced the next video whose markup really had drifted.
+    """
+
+    def _extract(self, container):
+        page = FakePage(url=ITEM_A)
+        with (
+            mock.patch.object(page_ops, "_transcript_from_panel", return_value=None),
+            mock.patch.object(page_ops, "_transcript_from_download", return_value=None),
+            mock.patch.object(page_ops.schema, "first_visible", return_value=container),
+            mock.patch.object(page_ops.schema, "report_stale") as reported,
+        ):
+            result = page_ops.extract_transcript(page)
+        return result, reported
+
+    def test_no_panel_at_all_reports_nothing(self):
+        result, reported = self._extract(None)
+        self.assertEqual(result, (None, "FAILED"))
+        reported.assert_not_called()
+
+    def test_a_panel_that_yields_no_text_is_still_reported(self):
+        result, reported = self._extract(object())
+        self.assertEqual(result, (None, "FAILED"))
+        reported.assert_called_once_with("the video transcript")

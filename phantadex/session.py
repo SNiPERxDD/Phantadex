@@ -128,28 +128,37 @@ class BrowserSession:
         return f"Could not attach to Chrome at {self.cdp_url}: {detail}"
 
     def find_course_page(self, course_url=""):
-        """Returns the course tab to work in, or ``None``.
+        """Returns the tab to work in, or ``None``.
 
         Given a ``course_url`` the tab is pointed at it, which also settles
-        which course is meant. Without one the first open platform tab is used;
-        Chrome reports tabs in the order they were opened, not in the order
-        they were last looked at, so with several of them open the choice is
-        announced rather than made silently.
+        which course is meant. Without one, a tab already inside a course wins
+        over one merely on the platform -- the catalogue and the enrolment list
+        are the same host but carry no course to read. Chrome reports tabs in
+        the order they were opened, not in the order they were last looked at,
+        so with several of them open the choice is announced rather than made
+        silently. A platform tab outside any course is still returned when it is
+        all there is, so the caller can say what it found instead of reporting
+        no tab at all.
         """
         tabs = self._platform_tabs()
         if course_url:
             return self._open(tabs[0] if tabs else self.context.new_page(), course_url)
         if not tabs:
             return None
-        if len(tabs) > 1:
+        in_course = [page for page in tabs if self._is_in_course(page)]
+        chosen = in_course or tabs
+        if len(chosen) > 1:
+            # Calling them course tabs when none of them is inside a course
+            # contradicts the line that follows it.
+            kind = "course tabs" if in_course else "platform tabs outside any course"
             logs.get_logger().warning(
-                "%d course tabs are open; working in %r. "
-                "Close the others, or pass the item URL to choose.",
-                len(tabs),
-                self._describe(tabs[0]),
+                "%d %s are open; working in %r. Close the others, or pass the item URL to choose.",
+                len(chosen),
+                kind,
+                self._describe(chosen[0]),
             )
-        tabs[0].bring_to_front()
-        return tabs[0]
+        chosen[0].bring_to_front()
+        return chosen[0]
 
     def _platform_tabs(self):
         """Returns every open tab on the learning platform, in Chrome's order."""
@@ -161,6 +170,15 @@ class BrowserSession:
             except Exception as exc:
                 log.debug("Could not inspect a tab: %s", exc)
         return tabs
+
+    @staticmethod
+    def _is_in_course(page):
+        """Reports whether a tab is open on a course item rather than elsewhere."""
+        try:
+            return urls.is_course_url(page.url)
+        except Exception as exc:
+            log.debug("Could not read a tab URL: %s", exc)
+            return False
 
     def _open(self, page, course_url):
         """Navigates ``page`` to a course link and returns it."""

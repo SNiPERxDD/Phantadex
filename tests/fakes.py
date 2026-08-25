@@ -45,12 +45,15 @@ class FakeLocator:
         tag="div",
         children=None,
         events=None,
+        links=None,
     ):
         self._count = count
         self._visible = visible
         self._text = text
         self._attributes = attributes or {}
         self._tag = tag
+        # ``[label, url]`` pairs, as the reading-link walk reads them.
+        self._links = links or []
         # Nested `selector -> FakeLocator` map, so a locator can stand in for a
         # container the code scopes further lookups inside (e.g. a modal).
         self.children = children or {}
@@ -84,10 +87,13 @@ class FakeLocator:
         return self._attributes.get(name)
 
     def evaluate(self, script):
-        # The row-text walk reads the element's own text; every other script
-        # the package sends an element asks for its tag name.
+        # The row-text walk reads the element's own text, the reading-link walk
+        # its anchors; every other script the package sends an element asks for
+        # its tag name.
         if "childNodes" in script:
             return self._text
+        if "a[href]" in script:
+            return [list(link) for link in self._links]
         return self._tag
 
     def locator(self, selector, has_text=None):

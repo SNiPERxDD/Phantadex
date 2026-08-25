@@ -142,5 +142,29 @@ class CourseLinkTests(unittest.TestCase):
         )
 
 
+class InsideACourseTests(unittest.TestCase):
+    """Telling a course item from the rest of the platform."""
+
+    def test_course_item_paths_are_inside_a_course(self):
+        for path in (
+            "/learn/x/lecture/AbCd/intro",
+            "https://www.coursera.org/learn/x/supplement/EfGh/notes",
+            "/learn/x/home/week/1",
+        ):
+            self.assertTrue(urls.is_course_url(path), path)
+
+    def test_the_platform_elsewhere_is_not(self):
+        # None of these carries the sidebar a run reads, so a run that lands on
+        # one has no map, no handler and nowhere to advance to.
+        for path in (
+            "https://www.coursera.org/",
+            "https://www.coursera.org/my-learning",
+            "https://www.coursera.org/browse/data-science",
+            "https://www.coursera.org/specializations/x",
+            "",
+        ):
+            self.assertFalse(urls.is_course_url(path), path)
+
+
 if __name__ == "__main__":
     unittest.main()

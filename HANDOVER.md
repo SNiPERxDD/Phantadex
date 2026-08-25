@@ -27,8 +27,9 @@ only what still constrains the code.
   not `scripts/`, which is not in the wheel -- an index install otherwise had no
   way to start the debug browser. `scripts/start_chrome_debug.py` stays as a
   wrapper. `.github/workflows/release.yml` publishes on a `v*` tag through PyPI
-  trusted publishing; the publisher is registered and `2.1.0` is the current
-  release on PyPI. A release is a version bump in `phantadex/__init__.py` and a
+  trusted publishing; the publisher is registered, `2.1.0` is the current
+  release on PyPI and the packaged version is `2.2.0`, not yet tagged. A
+  release is a version bump in `phantadex/__init__.py` and a
   matching `vX.Y.Z` tag -- `pyproject.toml` reads the version from that
   attribute, so there is one place to change. The workflow refuses a tag that
   disagrees with the packaged version, and PyPI refuses a version already used.
@@ -40,7 +41,9 @@ Each of these looks like an accident and is not.
 - **Tab choice is creation order.** Without a URL the first platform tab Chrome
   lists is used, and that is tab *creation* order, not recency, so it is not a
   reliable "current" tab. With more than one open the pick is warned about
-  rather than made silently.
+  rather than made silently. A tab already inside a course outranks one merely
+  on the platform: the home page, the catalogue and the enrolment list share the
+  host and carry no sidebar to read.
 - **Sidebar classification reads two separate haystacks**, the row subtext and
   the `aria-label`. Do not concatenate them again: the label is
   `<type>, <title>, <status>, <duration>`, so a title containing "peer", "quiz"
@@ -105,6 +108,30 @@ Each of these looks like an accident and is not.
   page reports need not agree, so a visited target can stay on the missing list;
   without the guard the loop re-issued the same `goto`, the URL-change check
   never fired again, and the poll spun in silence.
+- **One item can hold several adjacent map rows.** A peer assignment is two
+  sidebar rows -- the submission and the review of classmates' work -- served
+  under one opaque item id, so `urls.same_item` reports them equal. That is
+  correct and load-bearing: move detection, resume matching and `is_archived`
+  all rest on it. `get_next_url` and `get_previous_url` therefore step over
+  *every* row belonging to the current item, not just the matched one. Returning
+  index+1 handed back the page already open, `goto` was a no-op, the handler
+  advanced again, and a course ended by cycling on its last assignment forever.
+- **A log record and an in-place progress line share one terminal line.** The
+  bar and the spinner repaint with `\r` and no newline, so `logs.ConsoleHandler`
+  blanks the remembered line, emits the record, and repaints -- under
+  `logs._transient_lock`, which `logs.progress` also holds. Do not write a bar
+  frame straight to stdout, and do not add a handler that is a plain
+  `StreamHandler`: either one welds the message onto the bar's last frame and
+  freezes it there. `logs.bar_done()` before a warning is no longer needed and
+  is not a substitute.
+- **A run log is one file per process, not one per call.** The package logger
+  survives past any single run, so `logs.start_run_log` installs a
+  `logs.RunLogHandler` and closes whichever one is already attached; two live
+  handlers means every record is written twice. Tests that reach a real entry
+  point write for real, which is why importing `tests/` sets
+  `PHANTADEX_STATE_DIR` to a temporary directory -- do not remove it, or a test
+  run edits the resume ledger, the learned selectors and the logs of whoever
+  ran it.
 - **The ledger caps stored text at `course_manager.MAX_LEDGER_CONTENT_CHARS`
   (40,000).** The `.txt` beside it is the archive and is always written in full
   -- do not move the cap into `page_ops.extract_reading`, which would truncate
@@ -144,6 +171,16 @@ Each of these looks like an accident and is not.
   replaced on upgrade. Lookups scan candidates in the order
   `schema.selectors_for` declares, not through one comma-joined locator, which
   matched in DOM order and let a generic fallback outrank a verified selector.
+  A discovery pass re-ranks what the package ships; it cannot invent a selector,
+  so an element nothing matched is *named* rather than folded into "selectors
+  are stable". At runtime the same condition calls `schema.report_stale`, which
+  says once per run that the markup has changed and names `pdex discover`.
+  Probing a video page opens the transcript panel first
+  (`page_ops.open_transcript_panel`): collapsed, it leaves its toggle on screen
+  and its body off it, and the probe recorded the button as the transcript.
+  `rules.CORE_TYPES` is what a pass must cover before it stops, narrowed against
+  the course's own outline -- naming a type the course lacks costs nothing, and
+  omitting one it has is why `dialogue` had never been probed anywhere.
 - **Type detection.** The URL segment decides an item's type before any on-page
   player check, and the course scanner derives its segment table from the
   classifier's, so the two cannot drift and a reading containing a `<video>` is
@@ -195,6 +232,31 @@ Each of these looks like an accident and is not.
   (`coursera.org` or a subdomain); a bare suffix match also armed inside
   lookalike hosts such as `notcoursera.org`. `__exit__` releases it; media is
   left muted as it stands.
+- **Reading how long an item is.** One reader (`video.state`) serves both
+  element kinds; `narration_seconds` points it at `audio` and
+  `wait_for_duration` at `video`. It picks the *longest* element that reports a
+  finite duration, because a reading was measured carrying two narration tracks
+  with only one of them loaded, and the unloaded one reports `NaN`. A page with
+  no such element is answered without waiting, so the plain readings do not pay
+  the poll the narrated ones need. `interaction` must not import `video` --
+  `video` imports `interaction` -- so the handler does the read and hands the
+  seconds down to `reading_session`. `timing.dwell_minutes` is the pure rule:
+  narration wins outright and is left before it ends, otherwise the word-count
+  estimate plus a settling constant, capped by the listed duration.
+- **Who moves the tab.** Coursera advances to the next item itself a few
+  seconds after one completes, and the user may click any chapter at any
+  moment. Both routes out of a handler check the URL first and defer when it
+  has moved: `navigation.advance` returns `ALREADY_MOVED`, and the work-based
+  route in `BaseHandler.advance` skips `ctx.next_work` rather than routing from
+  a `start_url` that is now stale. Whoever moved the tab is right about where
+  it should be.
+- **Work the run cannot finish.** Not every item ends up marked complete: a
+  discussion prompt is read and archived but never posted to, so the sidebar
+  lists it as work for the whole run. `Runner.attempted_items` records an item
+  the run worked and left still listed, and `unfinished_items(exclude=...)`
+  drops it from the routing -- without it the run walked to that item, off it
+  onto a finished one, and straight back. It stays in the *report* of what is
+  left; only the routing forgets it.
 - **Modals.** Every in-video interrupt rule (Reflect, Poll, Question) is
   confined to `modals.IN_VIDEO_SCOPE` -- the dialog roles plus the player's
   `rc-VideoQuiz` container -- with no page fallback. Only Honor Code and the
@@ -220,6 +282,80 @@ Each of these looks like an accident and is not.
   its TXT asset, does not toggle an already-open panel closed, and deletes the
   downloaded file after reading it -- Playwright clears downloads when the
   context closes, and this context is the user's own Chrome, which does not.
+- **Run bounds.** Two, in `phantadex/limits.py`. `Budget` is the deliberate one
+  (`--modules N`, `--items N`, mutually exclusive), counted from where the run
+  starts rather than indexed from the course's first item, because
+  `resume_at_incomplete` is on by default and "the first two modules" would
+  usually name modules already finished. It is consulted on arrival and before
+  the item is handled, so a refusal costs nothing. `StallGuard` is the
+  involuntary one: forty passes without reaching an item the run has not been on
+  ends it. Do not raise the limit to paper over a cycle -- the guard exists
+  because each individual way of spinning was recoverable and none was counted.
+  `navigation._ledger_fallback` also refuses a destination equal to the item
+  already open, which can only mean the map repeats itself.
+- **Nothing left to do is a stop condition.** `Runner._resume_or_finish` asks
+  `CourseManager.unfinished_items` for the rows the sidebar marks unfinished,
+  minus `progress.SKIPPED_LABELS` -- graded work and the surveys the map labels
+  `FILLER`, none of which the run answers or archives. The first of what remains
+  is where the run resumes; when nothing remains it names what is left and
+  stops, rather than walking the rest of the course with a skip prompt on every
+  finished item. `--pause-on-graded` returns the graded labels to the work set
+  because then the run does wait on them. Only rows explicitly marked unfinished
+  count: absent is not unfinished. It is tied to `resume_at_incomplete` -- with
+  `--no-resume` the run walks forward from the item it was given, as before.
+- **Who a course is waiting on lives in one module.** `phantadex/progress.py`
+  owns `SKIPPED_LABELS`, `GRADED_LABELS` and `SELF_SUBMITTED_LABELS`, plus the
+  `split`/`summary` pair every count is printed through -- the course tree, the
+  per-module header and the run's closing report. Put the rule there rather than
+  beside whichever surface needs it next: it was previously half in the runner
+  and half in the ledger, which is why neither of the two places printing a
+  count could say which side of it a row fell on. The split is by item label and
+  the ledger, never by settings: `--pause-on-graded` changes when a run reaches
+  a graded item, not who answers it. A row the sidebar cannot be read for is
+  counted as unreadable and declared, so the parts always sum to the total.
+  `summary` names Phantadex's share even when it is zero and omits yours when it
+  is -- deliberately asymmetric: the run's own share is what a reader is
+  checking for, and omission would make "done" and "not started" print the same
+  line. It imports only `detection` and `urls`, which is what keeps `discovery`
+  able to import it.
+- **A run moves between work, not between rows.** `Runner._advance_to_work` is
+  handed to the handlers as `handlers.Context.next_work`, and
+  `BaseHandler.advance` asks it before touching the Next button:
+  `CourseManager.next_actionable` reads the sidebar at the item boundary and
+  returns the next unfinished row the run would act on, preferring the ones
+  ahead of the current item to the ones behind it. Rows addressing the item
+  being left are never returned -- the sidebar takes a moment to record a
+  completion, so the item just finished is routinely still listed as work. Two
+  fallbacks matter: a scan that cannot answer returns `None` and the platform's
+  Next button moves the run, and a sidebar whose only remaining work *is* the
+  item just left also falls back rather than declaring the course over. Do not
+  make a handler import the runner; the callable on the context is the seam.
+- **The map and the open page must agree about a survey.**
+  `discovery.apply_filler_override` reads `detection.SURVEY_TITLES`, the same
+  list `detection.classify` uses. When the two were separate, a row the
+  classifier called a survey was mapped `UNGRADED_PLUGIN`, so a run picked it as
+  the first thing left to do and only recognised it on arrival. Add a survey
+  phrase in `detection.SURVEY_TITLES` alone, and keep the phrases whole: a bare
+  "survey" matches course content about surveys.
+- **An archived item is not scraped again.** `BaseHandler.already_archived`
+  gates extraction in the video, reading and discussion handlers, and
+  `CourseManager.is_archived` is the predicate. Archived is not the same as
+  complete, so the item is still worked -- a video the ledger holds is still
+  watched. `pdex archive --force` is the way to deliberately scrape again.
+- **Item types have one spelling and one colour.** `logs.TYPE_WORDS` and
+  `logs.TYPE_COLOURS`, read through `logs.type_name` and `logs.type_tag`, by the
+  course tree, the handlers and the archiver alike. Do not put a coloured tag in
+  the right-aligned argument of `logs.item`: an escape sequence has length but
+  occupies no columns, and the padding is measured from it.
+- **Off-course tabs.** `urls.is_course_url` is the test. A run that starts on a
+  platform page outside a course says so and stops; a run that drifts onto one
+  steers back to the last item it was on and gives up after
+  `Runner.OFF_COURSE_LIMIT` attempts. Without this the page classified as
+  `UNKNOWN` and the loop span on it.
+- **Run logs.** Every Watch run writes one timestamped DEBUG file to
+  `<state directory>/logs/` (`--no-run-log` opts out, twenty kept). The package
+  logger sits at DEBUG and the *console handler* carries `--log-level`, so a
+  quiet console still leaves a full record. Do not set the level on the logger.
 - **Failure handling.** A persistently failing handler advances after three
   attempts instead of retrying forever, and the item is recorded with
   `status="failed"` so giving up is not indistinguishable from success; an item
@@ -229,7 +365,10 @@ Each of these looks like an accident and is not.
   course with nothing to save. One unreadable item during discovery is reported
   and skipped rather than ending the pass. Watch retreats from a locked
   interstitial to the required previous mapped item and pauses on the required
-  manual assessment instead of advancing back into the lock.
+  manual assessment instead of advancing back into the lock -- unless the map
+  places the item last, because a course's final screen renders no Next control
+  either and retreating from it sent the run in circles until the stall guard
+  ended it.
 - **Shutdown.** CDP shutdown disconnects Phantadex before Playwright stops, so
   the host Chrome stays open. Interruption output is centralized and clears the
   progress line first.
@@ -261,7 +400,7 @@ ruff check . && ruff format --check .
 ## Verification boundary
 
 - Offline tests, `ruff` and CLI help run without a browser or network. Current
-  gate: 543 tests pass in about a second, `ruff check .` and
+  gate: 771 tests pass in about a second, `ruff check .` and
   `ruff format --check .` both clean.
 - Live CDP work is verified against a real signed-in Chrome: course mapping and
   Dex row states, Watch archiving transcripts and pacing to its completion

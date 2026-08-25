@@ -51,12 +51,32 @@ class FillerOverrideTests(unittest.TestCase):
             discovery.apply_filler_override("READING", "End of course survey", "reading"), "FILLER"
         )
 
-    def test_only_the_title_is_checked_for_the_survey_marker(self):
-        # Documents existing behaviour, not an endorsement of it: a row whose
-        # *subtext* says "survey" but whose title does not is left as its content
-        # type, so it is still dwelled on and archived.
+    def test_a_row_the_classifier_would_call_a_survey_is_filler(self):
+        # The map and the open page have to agree. This exact row was mapped
+        # UNGRADED_PLUGIN, so a run picked it as the first thing left to do and
+        # navigated to it before recognising a survey and stepping past.
         self.assertEqual(
-            discovery.apply_filler_override("READING", "Please tell us about yourself", "survey"),
+            discovery.apply_filler_override(
+                "UNGRADED_PLUGIN", "Welcome! Please Tell Us About Yourself", "ungraded plugin"
+            ),
+            "FILLER",
+        )
+
+    def test_only_the_title_is_checked_for_the_survey_marker(self):
+        # A row whose *subtext* says survey but whose title names course content
+        # keeps its type, so it is still dwelled on and archived.
+        self.assertEqual(
+            discovery.apply_filler_override("READING", "Module 3 Readings", "survey"),
+            "READING",
+        )
+
+    def test_a_reading_about_surveys_is_still_a_reading(self):
+        # The phrases are whole ones for this reason: a bare "survey" would
+        # match course content that happens to be about them.
+        self.assertEqual(
+            discovery.apply_filler_override(
+                "READING", "A Survey of Reinforcement Learning", "reading"
+            ),
             "READING",
         )
 
@@ -311,6 +331,53 @@ class CompletionStatusTests(unittest.TestCase):
         self.assertIn("○ Notes · reading · 5 min", rendered)
         self.assertNotIn("╔", rendered)
 
+    def test_tree_splits_what_is_left_between_the_run_and_the_user(self):
+        outline = {
+            "Module 1": [
+                ("Welcome", "VIDEO", "/learn/demo/lecture/aaa/welcome", "3 min"),
+                ("Notes", "READING", "/learn/demo/supplement/bbb/notes", "5 min"),
+                ("Week 1 Quiz", "QUIZ", "/learn/demo/quiz/ccc/week-1", ""),
+            ]
+        }
+        with capture_console() as output:
+            discovery.print_course_map(
+                outline,
+                "Demo Course",
+                {
+                    "/learn/demo/lecture/aaa/welcome": True,
+                    "/learn/demo/supplement/bbb/notes": False,
+                    "/learn/demo/quiz/ccc/week-1": False,
+                },
+            )
+
+        rendered = output.getvalue()
+        self.assertIn("3 items · 1 complete · 1 left to Phantadex · 1 left to you", rendered)
+        self.assertIn("1/3 complete · 1 pdex · 1 you", rendered)
+
+    def test_a_finished_module_says_only_how_much_of_it_is_done(self):
+        outline = {"Module 1": [("Welcome", "VIDEO", "/learn/demo/lecture/aaa/welcome", "3 min")]}
+        with capture_console() as output:
+            discovery.print_course_map(
+                outline, "Demo Course", {"/learn/demo/lecture/aaa/welcome": True}
+            )
+        rendered = output.getvalue()
+        self.assertIn("1/1 complete", rendered)
+        self.assertNotIn("pdex", rendered)
+
+    def test_the_ledger_moves_a_read_discussion_onto_the_user_s_side(self):
+        outline = {
+            "Module 1": [("Say hello", "DISCUSSION", "/learn/demo/discussionPrompt/x/hello", "")]
+        }
+        with capture_console() as output:
+            discovery.print_course_map(
+                outline,
+                "Demo Course",
+                {"/learn/demo/discussionPrompt/x/hello": False},
+                is_archived=lambda href: True,
+            )
+        rendered = output.getvalue()
+        self.assertIn("nothing left to Phantadex · 1 left to you", rendered)
+
     def test_tree_marks_missing_sidebar_status_as_unknown(self):
         outline = {"Module 1": [("Notes", "READING", "/learn/demo/supplement/bbb/notes", "5 min")]}
         with capture_console() as output:
@@ -426,6 +493,47 @@ class SelectorDiscoveryFlowTests(unittest.TestCase):
         # absent, and the hop between items lost navigation.next_item.
         self.assertIs(state.selectors, findings)
         self.assertIn("next_item", findings["navigation"])
+
+    def test_the_transcript_panel_is_opened_before_it_is_probed(self):
+        # A collapsed panel leaves the toggle on screen and the body off it, so
+        # probing it shut verified the button as the transcript.
+        page = FakePage()
+        with (
+            mock.patch.object(probing.page_ops, "open_transcript_panel") as opener,
+            mock.patch("time.sleep"),
+        ):
+            probing.discover_selectors(page, ObservationState())
+        opener.assert_called_once_with(page)
+
+    def test_a_page_where_nothing_matched_says_so(self):
+        # "selectors are stable; no changes needed" and "no selector matched
+        # anything" are opposite reports, and this printed the first for both.
+        page = FakePage()
+        with capture_console() as output, mock.patch("time.sleep"):
+            probing.discover_selectors(page, ObservationState())
+        printed = output.getvalue()
+        self.assertIn("no selector matched", printed)
+        self.assertNotIn("selectors are stable", printed)
+
+
+class CoreTypeCoverageTests(unittest.TestCase):
+    """What a discovery pass must reach before it calls the course covered."""
+
+    def test_the_conversational_types_are_targets_too(self):
+        # Absent from this list, the pass ended before it ever opened a coach
+        # item -- so the `dialogue` selector category had never been probed.
+        self.assertIn("DIALOGUE", rules.CORE_TYPES)
+        self.assertIn("DISCUSSION", rules.CORE_TYPES)
+
+    def test_every_target_has_categories_worth_probing(self):
+        for item_type in rules.CORE_TYPES:
+            self.assertIn(item_type, probing.RELEVANT_CATEGORIES, item_type)
+
+    def test_filler_titles_come_from_the_classifier(self):
+        # Two hand-written copies had already drifted apart, so a page the map
+        # called filler was a page a run classified as content.
+        for phrase in detection.SURVEY_TITLES:
+            self.assertIn(phrase, rules.FILLER_KEYWORDS)
 
 
 class PackageBoundaryTests(unittest.TestCase):

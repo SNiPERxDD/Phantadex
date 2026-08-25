@@ -16,6 +16,7 @@ from . import (
     video,
     watch,
 )
+from .course_manager import CourseManager
 from .session import BrowserSession
 
 # One source for the command list: the overview documents each of them, and a
@@ -42,10 +43,20 @@ def dex_main(argv=None):
         if not course_map:
             logs.error("Course tree generation failed.")
             return 1
+        # The tree counts what is left to the run apart from what is left to
+        # the user, and a discussion the ledger already holds has moved from
+        # one side to the other -- so the tree reads the same ledger a run
+        # would. Read-only in the strict sense: on a course no run has touched
+        # it creates neither the directory nor the ledger, and it never takes
+        # the lock a live run in another terminal is holding.
+        manager = CourseManager(
+            course_map, course_name, root_dir=settings.transcript_dir, read_only=True
+        )
         discovery.print_course_map(
             course_map,
             course_name,
             discovery.get_completion_status(page),
+            is_archived=manager.is_archived,
         )
     return 0
 
@@ -108,6 +119,53 @@ def stop_main(argv=None):
     return processes.list_runs() if args.list else processes.stop_all()
 
 
+def _resolve_flag(token, flags):
+    """Reports whether ``token`` is a global option, and whether it takes a value.
+
+    Matches what argparse itself accepts, so the two agree on where the flags
+    end: ``--flag=value`` carried in one token, and any prefix long enough to
+    name exactly one option. Anything else answers "not mine".
+    """
+    name = token.split("=", 1)[0]
+    if name in flags:
+        return True, flags[name] and "=" not in token
+    if not name.startswith("--"):
+        return False, False
+    matches = [option for option in flags if option.startswith(name)]
+    if len(matches) == 1:
+        return True, flags[matches[0]] and "=" not in token
+    return False, False
+
+
+def _first_word(arguments):
+    """Returns the index of the first argument that is not a leading flag.
+
+    A command is recognised wherever it sits among the global flags, because
+    ``pdex -v watch`` is a reasonable thing to type. Looking only at position
+    zero sent that form to the default command instead, whose optional URL then
+    swallowed ``watch`` -- and the default command opens whatever URL it is
+    handed, so a flag typed first navigated the user's own course tab to
+    ``/watch`` and lost their place. The token after a value-taking flag is
+    stepped over as well, so ``--transcript-dir watch`` names a directory
+    rather than a command.
+    """
+    flags = config.global_flags()
+    index = 0
+    while index < len(arguments):
+        token = arguments[index]
+        if not token.startswith("-"):
+            return index
+        known, takes_value = _resolve_flag(token, flags)
+        if not known:
+            # Stop on it rather than step over it. An option this parser does
+            # not know belongs to a command -- ``pdex --items 5 watch`` -- and
+            # walking past it landed on the value, which was then announced as
+            # the unknown command ``'5'``: true, useless, and not the mistake.
+            return index
+        index += 2 if takes_value else 1
+    return len(arguments)
+
+
 def main(argv=None):
     """Dispatches the package CLI; no command defaults to Phantadex Dex."""
     arguments = list(sys.argv[1:] if argv is None else argv)
@@ -118,15 +176,24 @@ def main(argv=None):
         print(f"phantadex {__version__}")
         return 0
 
-    if arguments and arguments[0] in COMMANDS:
-        command = arguments.pop(0)
-    elif not arguments or arguments[0].startswith("-") or urls.is_platform_url(arguments[0]):
+    lead = _first_word(arguments)
+    if lead < len(arguments) and arguments[lead] in COMMANDS:
+        command = arguments.pop(lead)
+    elif lead == len(arguments) or urls.is_platform_url(arguments[lead]):
         # A bare course link is the default command pointed at that item, so
         # ``pdex <url>`` reads the course the link names.
         command = "dex"
     else:
         program = config.program_name()
-        print(f"{program}: unknown command {arguments[0]!r}", file=sys.stderr)
+        token = arguments[lead]
+        if token.startswith("-"):
+            print(f"{program}: unknown option {token!r} before the command", file=sys.stderr)
+            print(
+                f"A command's own options go after its name, as in '{program} watch {token} ...'.",
+                file=sys.stderr,
+            )
+        else:
+            print(f"{program}: unknown command {token!r}", file=sys.stderr)
         print(f"Commands: {', '.join(COMMANDS)}", file=sys.stderr)
         print(f"Run '{program} -h' for what each one does.", file=sys.stderr)
         return 2

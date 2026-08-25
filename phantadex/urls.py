@@ -111,6 +111,18 @@ def course_slug(url_or_path):
     return ""
 
 
+def is_course_url(url_or_path):
+    """Reports whether a URL sits inside a course rather than elsewhere on the platform.
+
+    ``/learn/<slug>/...`` carries the sidebar every part of a run reads: the
+    course map, the completion scan and the next-item control all come from it.
+    The platform's other pages -- the home page, the catalogue, the enrolment
+    list -- are on the same host and match nothing else, so a run that lands on
+    one has no map, no handler and nowhere to advance to.
+    """
+    return bool(course_slug(url_or_path))
+
+
 def same_item(left, right):
     """Reports whether two URLs address the same course item.
 

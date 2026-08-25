@@ -23,6 +23,12 @@ def main(argv=None):
     )
     settings = config.settings_from_args(parser.parse_args(argv))
     logs.setup(settings.log_level)
+    if settings.run_log:
+        # Announced once and at the start, so the path is to hand while the run
+        # is still going rather than only after whatever went wrong.
+        path = logs.start_run_log("watch")
+        if path:
+            logs.step(f"run log · {path}")
 
     try:
         runner.run(settings)

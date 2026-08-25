@@ -8,8 +8,10 @@ Everything routes through :mod:`logging`, so ``--log-level DEBUG`` surfaces the
 per-selector failures that used to vanish into ``except: pass``.
 """
 
+import datetime
 import logging
 import os
+import re
 import shutil
 import sys
 import threading
@@ -20,6 +22,26 @@ LOGGER_NAME = "phantadex"
 _configured = False
 _last_decile = -1
 
+# Directory of per-run log files, under the same user state directory the
+# discovery selectors live in, and how many runs are kept there.
+RUN_LOG_DIR_NAME = "logs"
+RUN_LOG_KEEP = 20
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+# The in-place line currently on screen -- a progress bar or a spinner frame --
+# and the lock that keeps painting it atomic against a log record arriving.
+# Without this a record lands on the same line the bar is repainting, welding
+# the two together and leaving the bar's last frame frozen in the scrollback.
+_transient = ""
+_transient_lock = threading.RLock()
+
+
+def strip_ansi(text):
+    """Returns ``text`` with any colour escape sequences removed."""
+    return _ANSI.sub("", text)
+
+
 # Status glyphs. Deliberately plain Unicode -- no emoji, no private-use "nerd
 # font" codepoints -- so the output is legible in any terminal and stays
 # readable when piped to a file or a CI log.
@@ -28,12 +50,62 @@ GLYPH = {
     "ok": "✓",
     "pending": "○",
     "step": "·",
+    "tip": "»",
     "nav": "→",
     "warn": "!",
     "error": "✗",
 }
 
 INDENT = "  "
+
+# How an item type is spelled and coloured for a person reading the output.
+# One table, consulted by the course tree, the archiver and the traversal alike,
+# so the same kind of item never appears under two different names or two
+# different colours depending on which command printed it.
+#
+# The labels are the map's, which are finer than the runner's page types (a peer
+# assignment and a submission are both handled as assignments but listed apart);
+# both vocabularies are keyed here because both reach the screen.
+TYPE_WORDS = {
+    "FILLER": "survey",
+    "PEER_REVIEW": "peer review",
+    "REVIEW_PEERS": "peer review",
+    "UNGRADED_PLUGIN": "ungraded plugin",
+}
+
+# Colour carries the same distinction the words do: what the run archives, what
+# it plays, what it leaves to you, and what it walks past.
+TYPE_COLOURS = {
+    "VIDEO": "cyan",
+    "READING": "green",
+    "DISCUSSION": "magenta",
+    "DIALOGUE": "magenta",
+    "QUIZ": "yellow",
+    "ASSIGNMENT": "yellow",
+    "PEER_REVIEW": "yellow",
+    "REVIEW_PEERS": "yellow",
+    "PLUGIN": "blue",
+    "UNGRADED_PLUGIN": "blue",
+    "LAB": "blue",
+}
+
+
+def type_name(item_type):
+    """Returns the reading name of an item type: ``PEER_REVIEW`` -> peer review."""
+    label = str(item_type or "").upper()
+    return TYPE_WORDS.get(label, label.lower().replace("_", " "))
+
+
+def type_tag(item_type):
+    """Returns the reading name of an item type, coloured for its kind.
+
+    Types with no colour of their own -- a survey, an unclassified page -- are
+    dimmed rather than left plain, because on a screen of item lines the ones
+    the run does nothing with should be the ones that recede.
+    """
+    name = type_name(item_type)
+    colour = TYPE_COLOURS.get(str(item_type or "").upper())
+    return getattr(paint, colour)(name) if colour else paint.dim(name)
 
 
 class _Palette:
@@ -60,8 +132,17 @@ class _Palette:
     def red(self, text):
         return self(31, text)
 
+    def bright_red(self, text):
+        return self(91, text)
+
     def cyan(self, text):
         return self(36, text)
+
+    def blue(self, text):
+        return self(34, text)
+
+    def magenta(self, text):
+        return self(35, text)
 
 
 def _enable_windows_ansi():
@@ -134,6 +215,45 @@ class ConsoleFormatter(logging.Formatter):
         return f"{INDENT}{message}"
 
 
+class RunLogFormatter(logging.Formatter):
+    """Formats a record for the run log file: timestamped, levelled, uncoloured.
+
+    The console formatter's output is shaped for a terminal -- glyphs, indents
+    and escape codes -- none of which belongs in a file that exists to be read
+    back later. Colour is stripped rather than disabled at the source because
+    :func:`_emit` hands over lines that were already painted.
+    """
+
+    default_msec_format = "%s.%03d"
+
+    def format(self, record):
+        record = logging.makeLogRecord(record.__dict__)
+        record.msg = strip_ansi(record.getMessage())
+        record.args = None
+        return super().format(record)
+
+
+class ConsoleHandler(logging.StreamHandler):
+    """A stream handler that does not write over an in-place progress line.
+
+    :func:`bar` and :func:`spinner` paint with a carriage return and no newline,
+    so the cursor sits mid-line for as long as either is running. A record
+    written straight out from there is appended to the bar instead of starting
+    its own line, and the half-drawn bar is left behind in the scrollback
+    looking like a run that stopped making progress. The line is erased before
+    the record and repainted after it, so the animation survives the
+    interruption instead of being cut off by it.
+    """
+
+    def emit(self, record):
+        with _transient_lock:
+            _erase_transient()
+            try:
+                super().emit(record)
+            finally:
+                _repaint_transient()
+
+
 def console_stream():
     """Returns stdout, widened to UTF-8 when the stream will accept the change.
 
@@ -158,17 +278,108 @@ def console_stream():
 
 
 def setup(level="INFO"):
-    """Configures the package logger once. Safe to call from any entry point."""
+    """Configures the package logger once. Safe to call from any entry point.
+
+    The logger itself is left at DEBUG and the console handler carries the
+    requested level, so :func:`start_run_log` can record everything to a file
+    regardless of how quiet the terminal was asked to be. That is the point of
+    the file: the console level is chosen before anyone knows what will go
+    wrong, and a run that fails under ``-q`` used to leave nothing to read.
+    """
     global _configured
     logger = logging.getLogger(LOGGER_NAME)
-    logger.setLevel(getattr(logging, str(level).upper(), logging.INFO))
+    console_level = getattr(logging, str(level).upper(), logging.INFO)
+    logger.setLevel(logging.DEBUG)
     if not _configured:
-        handler = logging.StreamHandler(console_stream())
+        handler = ConsoleHandler(console_stream())
         handler.setFormatter(ConsoleFormatter())
         logger.addHandler(handler)
         logger.propagate = False
         _configured = True
+    for handler in logger.handlers:
+        if isinstance(handler, ConsoleHandler):
+            handler.setLevel(console_level)
     return logger
+
+
+class RunLogHandler(logging.FileHandler):
+    """Marks the file handler this module installs, so it can be found again.
+
+    A plain :class:`logging.FileHandler` is indistinguishable from any other,
+    and the package logger outlives a single run inside a long-lived process --
+    a test suite, or an entry point called twice. Without a marker the second
+    call added a second file, and every record from then on was written to both.
+    """
+
+
+def run_log_dir():
+    """Returns the directory per-run log files are written to."""
+    # Imported here rather than at module scope: ``schema`` logs through this
+    # module, so a top-level import is a cycle.
+    from . import schema
+
+    return os.path.join(schema.state_dir(), RUN_LOG_DIR_NAME)
+
+
+def start_run_log(command):
+    """Adds a DEBUG-level file handler for this run. Returns the path, or ``None``.
+
+    One file per run, named for the command and the moment it started. Nothing
+    identifying the machine or the account goes into the name or the contents
+    beyond what the run itself prints. A directory that cannot be created is not
+    worth ending a run over, so the failure is reported and the run continues
+    with console output alone.
+    """
+    directory = run_log_dir()
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    path = os.path.join(directory, f"{command}-{stamp}.log")
+    try:
+        os.makedirs(directory, exist_ok=True)
+        handler = RunLogHandler(path, encoding="utf-8")
+    except OSError as exc:
+        warn(f"Could not open a run log in {directory}: {exc}")
+        return None
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(RunLogFormatter("%(asctime)s %(levelname)-7s %(name)s  %(message)s"))
+    logger = logging.getLogger(LOGGER_NAME)
+    close_run_log(logger)
+    logger.addHandler(handler)
+    _prune_run_logs(directory)
+    return path
+
+
+def close_run_log(logger=None):
+    """Removes and closes any run log this module already installed.
+
+    One run, one file. Called before a new one is opened so records are never
+    fanned out across the handlers a previous call left behind.
+    """
+    logger = logging.getLogger(LOGGER_NAME) if logger is None else logger
+    for handler in [h for h in logger.handlers if isinstance(h, RunLogHandler)]:
+        logger.removeHandler(handler)
+        handler.close()
+
+
+def _prune_run_logs(directory, keep=RUN_LOG_KEEP):
+    """Deletes all but the newest ``keep`` run logs, so the directory stays bounded.
+
+    Sorted by modification time rather than by name. A run log is named
+    ``{command}-{stamp}.log``, so sorting the names puts the command first and
+    the timestamp second: with the directory full of ``watch`` logs, a run named
+    ``archive`` sorted below every one of them and deleted the file it had just
+    opened -- which on POSIX keeps the run writing into an unlinked inode.
+    """
+    try:
+        entries = sorted(
+            (name for name in os.listdir(directory) if name.endswith(".log")),
+            key=lambda name: os.path.getmtime(os.path.join(directory, name)),
+            reverse=True,
+        )
+        for name in entries[keep:]:
+            os.remove(os.path.join(directory, name))
+    except OSError as exc:
+        log_path = os.path.join(directory, "*.log")
+        get_logger().debug("Could not prune old run logs at %s: %s", log_path, exc)
 
 
 def get_logger(name=None):
@@ -222,8 +433,24 @@ def ok(message):
 
 
 def pending(message):
-    """A sub-step that is not completed yet."""
-    _emit(f"{INDENT}{paint.dim(GLYPH['pending'])} {message}")
+    """A sub-step that is not completed yet.
+
+    The marker is bright red rather than dim: on a course tree that is mostly
+    ticks, the handful of rows still outstanding are what the page is being read
+    for, and dimming them made the reader hunt. Errors keep plain red, which is
+    the darker of the two.
+    """
+    _emit(f"{INDENT}{paint.bright_red(GLYPH['pending'])} {message}")
+
+
+def tip(message):
+    """A suggestion about how to change the run, not a report about this one.
+
+    Kept apart from :func:`step` because a line that names a flag is addressed
+    to the reader rather than describing what just happened, and the two read
+    as the same kind of thing when they carry the same glyph.
+    """
+    _emit(f"{INDENT}{paint.cyan(GLYPH['tip'])} {message}")
 
 
 def nav(message):
@@ -264,8 +491,31 @@ def bar(fraction, caption="", width=24):
 
 def bar_done():
     """Clears the in-place progress line so the next log lands cleanly."""
-    global _last_decile
+    global _last_decile, _transient
     _last_decile = -1
+    if not paint.enabled:
+        return
+    with _transient_lock:
+        _transient = ""
+        _erase_transient()
+
+
+def progress(message):
+    """Writes an in-place progress line (bypasses logging; not a record).
+
+    The line is remembered as well as written, so a log record arriving
+    mid-animation can erase it, print itself on a line of its own, and put the
+    animation back where it was.
+    """
+    global _transient
+    with _transient_lock:
+        _transient = message
+        sys.stdout.write(f"\r{message}")
+        sys.stdout.flush()
+
+
+def _erase_transient():
+    """Blanks the line the cursor is sitting on, leaving the cursor at its start."""
     if not paint.enabled:
         return
     width = shutil.get_terminal_size((80, 24)).columns
@@ -273,9 +523,11 @@ def bar_done():
     sys.stdout.flush()
 
 
-def progress(message):
-    """Writes an in-place progress line (bypasses logging; not a record)."""
-    sys.stdout.write(f"\r{message}")
+def _repaint_transient():
+    """Redraws the remembered in-place line after a record interrupted it."""
+    if not _transient or not paint.enabled:
+        return
+    sys.stdout.write(f"\r{_transient}")
     sys.stdout.flush()
 
 

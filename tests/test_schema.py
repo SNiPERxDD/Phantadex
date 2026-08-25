@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 from phantadex import schema
+from tests.fakes import capture_console
 
 MISSING = "/nonexistent/config.yaml"
 
@@ -176,6 +177,36 @@ class _Candidate:
 
     def is_visible(self):
         return self._visible
+
+
+class StaleSelectorHintTests(unittest.TestCase):
+    """Saying the markup moved, once, and pointing at the pass that repairs it."""
+
+    def setUp(self):
+        schema.reload_verified_selectors()
+
+    def tearDown(self):
+        schema.reload_verified_selectors()
+
+    def test_the_hint_names_the_element_and_the_command(self):
+        with capture_console() as output:
+            schema.report_stale("the video transcript")
+        printed = output.getvalue()
+        self.assertIn("the video transcript", printed)
+        self.assertIn("pdex discover", printed)
+
+    def test_it_is_said_once_however_many_items_hit_it(self):
+        with capture_console() as output:
+            for _ in range(40):
+                schema.report_stale("the reading body")
+        self.assertEqual(output.getvalue().count("pdex discover"), 1)
+
+    def test_a_repair_lets_it_be_said_again(self):
+        schema.report_stale("the reading body")
+        schema.reload_verified_selectors()
+        with capture_console() as output:
+            schema.report_stale("the reading body")
+        self.assertIn("pdex discover", output.getvalue())
 
 
 if __name__ == "__main__":

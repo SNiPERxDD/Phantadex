@@ -160,6 +160,14 @@ def _ledger_fallback(page, manager):
         logs.ok("no next item in course map -- traversal complete")
         return "COURSE_COMPLETE"
 
+    if urls.same_item(next_url, page.url):
+        # Navigating to the item already open advances nothing, and the caller
+        # would read the success as progress and ask again on the next tick.
+        # ``get_next_url`` no longer returns the current item, so reaching here
+        # means the map itself repeats it -- which is a broken map, not an end.
+        logs.warn("The next mapped item is the one already open; the course map repeats it.")
+        return "FAILED"
+
     logs.nav(f"map navigate {next_url}")
     try:
         page.goto(next_url)

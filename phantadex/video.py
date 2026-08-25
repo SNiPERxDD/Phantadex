@@ -1,7 +1,13 @@
-"""HTML5 video state reads and playback control.
+"""HTML5 media state reads and video playback control.
 
 Player state is fetched in one ``page.evaluate`` round trip instead of the four
 separate calls the old watch loop issued every second.
+
+One reader serves both element kinds. A narrated reading carries an ``<audio>``
+element with a real duration on it, which is the length of the item as the
+platform means it -- and the video-only read here could not see it, so every
+reading was paced by a word count alone. Playback control below stays with
+``<video>``: a narration player is muted on sight and never driven.
 """
 
 import random
@@ -11,19 +17,52 @@ from . import interaction, logs, schema, timing
 
 log = logs.get_logger("video")
 
-_STATE_JS = """
-() => {
-    const video = document.querySelector('video');
-    if (!video) return null;
+VIDEO_SELECTOR = "video"
+NARRATION_SELECTOR = "audio"
+# Passes spent waiting for a narration element to report its length. Shorter
+# than the video wait: a reading proceeds without one, where a video cannot.
+NARRATION_LOAD_ATTEMPTS = 6
+
+# The element every script in this module acts on. A page can hold more than one
+# player -- a reading was measured carrying two narration tracks, only one of
+# them loaded -- and an element that has not loaded reports its duration as NaN.
+# The longest real duration is the item; taking the first node in document order
+# picked the empty one. The rule is shared rather than restated per script,
+# because reading the state of one element while playing and seeking another is
+# a playback position that never advances.
+_PICK_FN = """
+    const pick = (selector) => {
+        let chosen = null;
+        let longest = -1;
+        for (const node of document.querySelectorAll(selector)) {
+            const duration = Number.isFinite(node.duration) ? node.duration : 0;
+            if (duration > longest) {
+                longest = duration;
+                chosen = node;
+            }
+        }
+        return chosen;
+    };
+"""
+
+_STATE_JS = (
+    """
+(selector) => {"""
+    + _PICK_FN
+    + """
+    const node = pick(selector);
+    if (!node) return null;
+    const duration = Number.isFinite(node.duration) ? node.duration : 0;
     return {
-        duration: Number.isFinite(video.duration) ? video.duration : 0,
-        currentTime: Number.isFinite(video.currentTime) ? video.currentTime : 0,
-        paused: video.paused,
-        ended: video.ended,
-        muted: video.muted,
+        duration: duration > 0 ? duration : 0,
+        currentTime: Number.isFinite(node.currentTime) ? node.currentTime : 0,
+        paused: node.paused,
+        ended: node.ended,
+        muted: node.muted,
     };
 }
 """
+)
 
 # Share of the player's width a candidate progress bar must span. The real
 # timeline covers nearly all of it; the drag handle inside it covers under 1%.
@@ -35,64 +74,94 @@ MIN_BAR_SHARE_OF_PLAYER = 0.5
 # player also plays on while the arrival is being polled for.
 SEEK_ARRIVAL_FRACTION = 0.8
 
-_MUTE_JS = """
-() => {
-    const video = document.querySelector('video');
-    if (!video) return false;
-    video.muted = true;
-    video.volume = 0;
+_MUTE_JS = (
+    """
+(selector) => {"""
+    + _PICK_FN
+    + """
+    const node = pick(selector);
+    if (!node) return false;
+    node.muted = true;
+    node.volume = 0;
     return true;
 }
 """
+)
 
-_PLAY_JS = """
-() => {
-    const video = document.querySelector('video');
-    if (!video) return false;
-    const result = video.play();
+_PLAY_JS = (
+    """
+(selector) => {"""
+    + _PICK_FN
+    + """
+    const node = pick(selector);
+    if (!node) return false;
+    const result = node.play();
     if (result && typeof result.catch === 'function') result.catch(() => {});
     return true;
 }
 """
+)
 
-_SEEK_JS = """
-(targetSeconds) => {
-    const video = document.querySelector('video');
-    if (!video) return false;
+_SEEK_JS = (
+    """
+([selector, targetSeconds]) => {"""
+    + _PICK_FN
+    + """
+    const node = pick(selector);
+    if (!node) return false;
     // Assigning currentTime makes the browser fire seeking, seeked and
     // timeupdate itself. An extra dispatched timeupdate was redundant, and
     // being script-made it was the one event on the page with isTrusted false.
-    video.currentTime = targetSeconds;
-    const result = video.play();
+    node.currentTime = targetSeconds;
+    const result = node.play();
     if (result && typeof result.catch === 'function') result.catch(() => {});
     return true;
 }
 """
+)
 
 
-def state(page):
-    """Returns the player state dict, or ``None`` when no <video> is present."""
+def state(page, selector=VIDEO_SELECTOR):
+    """Returns the media state dict, or ``None`` when no such element is present."""
     try:
-        return page.evaluate(_STATE_JS)
+        return page.evaluate(_STATE_JS, selector)
     except Exception as exc:
-        log.debug("Video state read failed: %s", exc)
+        log.debug("Media state read failed for %r: %s", selector, exc)
         return None
 
 
-def wait_for_duration(page, attempts=10, interval=0.5):
+def narration_state(page):
+    """Returns the state of a reading's narration player, or ``None``."""
+    return state(page, NARRATION_SELECTOR)
+
+
+def wait_for_duration(page, attempts=10, interval=0.5, selector=VIDEO_SELECTOR):
     """Polls until the player reports a duration. Returns seconds, or 0.0."""
     for _ in range(attempts):
-        snapshot = state(page)
+        snapshot = state(page, selector)
         if snapshot and snapshot["duration"] > 0:
             return float(snapshot["duration"])
         time.sleep(interval)
     return 0.0
 
 
+def narration_seconds(page, attempts=NARRATION_LOAD_ATTEMPTS, interval=0.5):
+    """Returns the length of a reading's narration, or ``0.0`` when it has none.
+
+    Polled rather than read once: an element that is still loading reports no
+    duration at all, and the first tick on an item is exactly when that is true.
+    A page carrying no player at all is answered immediately, so the plain
+    readings -- most of them -- pay nothing for the ones that are narrated.
+    """
+    if state(page, NARRATION_SELECTOR) is None:
+        return 0.0
+    return wait_for_duration(page, attempts, interval, NARRATION_SELECTOR)
+
+
 def mute_and_play(page):
     """Mutes the player and starts playback."""
     try:
-        page.evaluate(_MUTE_JS)
+        page.evaluate(_MUTE_JS, VIDEO_SELECTOR)
         interaction.silence_media(page)
 
         # Only click an explicit "Mute" control -- clicking "Unmute" would undo it.
@@ -101,7 +170,7 @@ def mute_and_play(page):
             label = (mute_button.get_attribute("aria-label") or "").strip().lower()
             if label == "mute":
                 interaction.click(page, mute_button, reaction_range=(0.2, 0.5))
-                page.evaluate(_MUTE_JS)
+                page.evaluate(_MUTE_JS, VIDEO_SELECTOR)
         logs.step("muted")
     except Exception as exc:
         log.debug("Mute sequence failed: %s", exc)
@@ -113,7 +182,7 @@ def mute_and_play(page):
             interaction.click(page, play_button, reaction_range=(0.2, 0.5))
         else:
             log.debug("No play control found; calling video.play() directly")
-            page.evaluate(_PLAY_JS)
+            page.evaluate(_PLAY_JS, VIDEO_SELECTOR)
     except Exception as exc:
         log.debug("Play failed: %s", exc)
 
@@ -124,7 +193,7 @@ def resume_if_paused(page):
     if snapshot is None or not snapshot["paused"] or snapshot["ended"]:
         return False
     try:
-        page.evaluate(_PLAY_JS)
+        page.evaluate(_PLAY_JS, VIDEO_SELECTOR)
         log.debug("Resumed playback at %.1fs", snapshot["currentTime"])
         return True
     except Exception as exc:
@@ -269,7 +338,7 @@ def seek_into_range(page, range_text):
         log.debug("Seeking from %.1fs to %.1fs", current, target)
         if not seek_via_ui(page, target / duration):
             log.debug("Player control unavailable; using the direct seek")
-            page.evaluate(_SEEK_JS, target)
+            page.evaluate(_SEEK_JS, [VIDEO_SELECTOR, target])
     except Exception as exc:
         log.warning("Seek failed: %s", exc)
         return False

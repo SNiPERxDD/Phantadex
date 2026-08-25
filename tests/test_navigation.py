@@ -4,7 +4,7 @@ import unittest
 from unittest import mock
 
 from phantadex import navigation
-from tests.fakes import FakeLocator, FakePage
+from tests.fakes import FakeLocator, FakePage, capture_console
 
 ITEM_A = "/learn/demo/lecture/aaa/one"
 ITEM_B = "https://www.coursera.org/learn/demo/lecture/bbb/two"
@@ -196,6 +196,25 @@ class MarkCompleteTests(unittest.TestCase):
         # tests/test_schema.py::FirstVisibleTests.
         with mock.patch.object(navigation.schema, "first_visible", return_value=None):
             self.assertIsNone(navigation.next_button(FakePage()))
+
+
+class SelfDestinationTests(unittest.TestCase):
+    """A map that offers an item as its own successor is refused, not obeyed."""
+
+    def test_a_next_url_matching_the_open_item_fails_instead_of_navigating(self):
+        page = FakePage(url="https://www.coursera.org/learn/x/peer/AbCd/give-feedback")
+        manager = mock.Mock()
+        manager.get_next_url.return_value = "https://www.coursera.org/learn/x/peer/AbCd/exercise"
+        manager.is_mapped.return_value = True
+
+        with (
+            mock.patch.object(navigation.schema, "first_visible", return_value=None),
+            capture_console() as console,
+        ):
+            self.assertEqual(navigation.advance(page, manager), "FAILED")
+
+        self.assertEqual(page.goto_calls, [])
+        self.assertIn("already open", console.getvalue())
 
 
 if __name__ == "__main__":

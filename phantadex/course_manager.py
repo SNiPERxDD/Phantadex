@@ -3,13 +3,14 @@
 import io
 import os
 import random
+import re
 import tempfile
 import time
 import xml.etree.ElementTree as ET
 from contextlib import contextmanager
 from datetime import datetime
 
-from . import REPOSITORY_URL, __version__, config, logs, storage, urls
+from . import REPOSITORY_URL, __version__, config, logs, progress, storage, urls
 
 log = logs.get_logger("course_manager")
 
@@ -57,6 +58,41 @@ def _ledger_banner():
     )
 
 
+# Characters XML 1.0 has no representation for. ElementTree writes them through
+# verbatim, the next read raises ParseError, and an unreadable ledger is
+# quarantined and rebuilt empty -- so the writer's own output is what destroys
+# the record of everything archived so far. Scraped body text is already clean
+# (``text.clean_reading`` splits on the vertical tab and the form feed), but a
+# title comes off the sidebar untouched and a failure reason is whatever an
+# exception happened to carry. Lone surrogates fall outside the allowed ranges
+# and go the same way.
+_ILLEGAL_XML = re.compile("[^\u0009\u000a\u000d\u0020-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]")
+
+
+def _xml_safe(value):
+    """Returns ``value`` without the characters XML 1.0 cannot carry."""
+    return _ILLEGAL_XML.sub("", value)
+
+
+def _scrub(element):
+    """Strips those characters from a whole tree in place, before it is written.
+
+    Done at the one write boundary rather than at each of the several places
+    that set a title, a reason or a body: an invariant every caller has to
+    remember is one a caller will eventually forget, and the cost of forgetting
+    here is the whole ledger.
+    """
+    for node in element.iter():
+        for name, value in list(node.attrib.items()):
+            cleaned = _xml_safe(value)
+            if cleaned != value:
+                node.set(name, cleaned)
+        if node.text:
+            node.text = _xml_safe(node.text)
+        if node.tail:
+            node.tail = _xml_safe(node.tail)
+
+
 def _serialize(tree):
     """Returns the ledger as bytes, declaration included."""
     buffer = io.BytesIO()
@@ -84,13 +120,12 @@ def _with_banner(document):
 class CourseManager:
     """Owns the on-disk archive for one course: text files plus an XML ledger."""
 
-    def __init__(self, course_map, course_name, root_dir=None):
+    def __init__(self, course_map, course_name, root_dir=None, read_only=False):
         self.course_map = course_map
         self.course_name = course_name
         self.safe_course_name = storage.sanitize_filename(course_name)
         root_dir = root_dir or config.TRANSCRIPT_DIR
         self.root_dir = os.path.join(root_dir, self.safe_course_name)
-        _migrate_legacy_course_directory(root_dir, self.safe_course_name)
         course_slug = next(
             (
                 urls.course_slug(url)
@@ -105,8 +140,20 @@ class CourseManager:
         self.legacy_xml_path = os.path.join(self.root_dir, "course_content.xml")
         self.lock_path = os.path.join(self.root_dir, ".phantadex.lock")
 
-        os.makedirs(self.root_dir, exist_ok=True)
         self._flat_paths = self._flatten_map()
+        if read_only:
+            # A reader must not bring the thing it is reading into existence.
+            # `pdex dex` opens the ledger to tell an archived item from an
+            # unarchived one, and on a course no run has touched that would
+            # otherwise mean creating the directory, migrating a legacy ledger,
+            # taking the lock a live run holds, and writing a skeleton -- four
+            # side effects to answer a question about a file that is not there.
+            return
+        # Below the guard, not above it: this one creates a directory and moves
+        # another, so a tree printed on a machine with a legacy archive
+        # relocated the user's files to answer a question about them.
+        _migrate_legacy_course_directory(root_dir, self.safe_course_name)
+        os.makedirs(self.root_dir, exist_ok=True)
         with self._course_lock():
             self._migrate_legacy_ledger()
             self._init_xml()
@@ -192,6 +239,7 @@ class CourseManager:
 
     def _write_tree(self, tree):
         """Atomically replaces the ledger with a fully serialized XML file."""
+        _scrub(tree.getroot())
         if hasattr(ET, "indent"):
             ET.indent(tree, space="  ", level=0)
         descriptor, temporary_path = tempfile.mkstemp(
@@ -304,25 +352,32 @@ class CourseManager:
         if tree is None:
             return False
 
+        item = self._find_item(tree, current_url)
+        if item is None:
+            return self._adopt_item(tree, current_url, content_text, content_type, filename)
+
+        content_node = item.find("content")
+        if content_node is None:
+            content_node = ET.SubElement(item, "content")
+        content_node.text = _bounded_content(content_text, filename)
+        if item.get("status") == "failed":
+            for attribute in ("status", "failure_reason", "failed_at"):
+                item.attrib.pop(attribute, None)
+        try:
+            self._write_tree(tree)
+            return True
+        except OSError as exc:
+            log.error("Could not write ledger %s: %s", self.xml_path, exc)
+            return False
+
+    @staticmethod
+    def _find_item(tree, current_url):
+        """Returns the ledger entry for ``current_url``, or ``None``."""
         for item in tree.getroot().findall(".//item"):
             item_url = item.get("url")
-            if not item_url or not urls.same_item(item_url, current_url):
-                continue
-            content_node = item.find("content")
-            if content_node is None:
-                content_node = ET.SubElement(item, "content")
-            content_node.text = _bounded_content(content_text, filename)
-            if item.get("status") == "failed":
-                for attribute in ("status", "failure_reason", "failed_at"):
-                    item.attrib.pop(attribute, None)
-            try:
-                self._write_tree(tree)
-                return True
-            except OSError as exc:
-                log.error("Could not write ledger %s: %s", self.xml_path, exc)
-                return False
-
-        return self._adopt_item(tree, current_url, content_text, content_type, filename)
+            if item_url and urls.same_item(item_url, current_url):
+                return item
+        return None
 
     def _adopt_item(self, tree, current_url, content_text, content_type, filename):
         """Adds a ledger entry for an archived item the ledger did not list.
@@ -336,14 +391,34 @@ class CourseManager:
         did not mention it. The item is filed where the map places it, or under
         a catch-all module when the map does not know the URL at all.
         """
+        module_name, item_node = self._new_item_node(
+            tree, current_url, ITEM_TYPES_BY_CONTENT_TYPE.get(content_type)
+        )
+        ET.SubElement(item_node, "content").text = _bounded_content(content_text, filename)
+
+        try:
+            self._write_tree(tree)
+        except OSError as exc:
+            log.error("Could not write ledger %s: %s", self.xml_path, exc)
+            return False
+        log.info("Adopted %s into the ledger under %s", current_url, module_name)
+        return True
+
+    def _new_item_node(self, tree, current_url, item_type=None):
+        """Adds an empty ledger entry for ``current_url``, returning its module and node.
+
+        The item is filed where the map places it, or under a catch-all module
+        when the map does not know the URL at all. ``item_type`` overrides the
+        map's own label, which is what the archiver needs: the sidebar row and
+        the live page can disagree about what an item is, and the page won.
+        """
         entry = self._map_entry(current_url)
         if entry is None:
             module_name = UNRESOLVED_MODULE
             title = _title_from_url(current_url)
-            item_type = ITEM_TYPES_BY_CONTENT_TYPE.get(content_type, "UNKNOWN")
+            mapped_type = "UNKNOWN"
         else:
             module_name, title, mapped_type = entry
-            item_type = ITEM_TYPES_BY_CONTENT_TYPE.get(content_type, mapped_type)
 
         root = tree.getroot()
         module_node = next(
@@ -354,17 +429,9 @@ class CourseManager:
             module_node = ET.SubElement(root, "module", title=module_name)
         item_node = ET.SubElement(module_node, "item")
         item_node.set("title", title)
-        item_node.set("type", item_type)
+        item_node.set("type", item_type or mapped_type)
         item_node.set("url", urls.normalize_path(current_url))
-        ET.SubElement(item_node, "content").text = _bounded_content(content_text, filename)
-
-        try:
-            self._write_tree(tree)
-        except OSError as exc:
-            log.error("Could not write ledger %s: %s", self.xml_path, exc)
-            return False
-        log.info("Adopted %s into the ledger under %s", current_url, module_name)
-        return True
+        return module_name, item_node
 
     def _map_entry(self, current_url):
         """Returns ``(module_name, title, item_type)`` for a mapped URL, else ``None``."""
@@ -385,21 +452,23 @@ class CourseManager:
             tree = self._read_tree()
             if tree is None:
                 return False
-            for item in tree.getroot().findall(".//item"):
-                item_url = item.get("url")
-                if not item_url or not urls.same_item(item_url, current_url):
-                    continue
-                item.set("status", "failed")
-                item.set("failure_reason", str(reason)[:200])
-                item.set("failed_at", str(datetime.now()))
-                try:
-                    self._write_tree(tree)
-                    return True
-                except OSError as exc:
-                    log.error("Could not write ledger %s: %s", self.xml_path, exc)
-                    return False
-            log.debug("No ledger entry matches %s", current_url)
-            return False
+            item = self._find_item(tree, current_url)
+            if item is None:
+                # The ledger only lists the types that get archived, so a lab
+                # or a plugin that failed three times matched nothing here and
+                # left one debug line as its whole trace -- giving up and
+                # succeeding looked identical to the next run. The entry is
+                # created so the failure is recorded whatever the type.
+                _module_name, item = self._new_item_node(tree, current_url)
+            item.set("status", "failed")
+            item.set("failure_reason", str(reason)[:200])
+            item.set("failed_at", str(datetime.now()))
+            try:
+                self._write_tree(tree)
+                return True
+            except OSError as exc:
+                log.error("Could not write ledger %s: %s", self.xml_path, exc)
+                return False
 
     def failed_paths(self):
         """Returns the normalized paths automation gave up on."""
@@ -454,31 +523,177 @@ class CourseManager:
         normalized = urls.normalize_path(current_url)
         return any(urls.same_item(path, normalized) for path in self._flat_paths)
 
-    def get_next_url(self, current_url):
-        """Returns the absolute URL of the next mapped item, or ``None`` at the end.
+    def item_count(self):
+        """Returns how many distinct items the map addresses.
 
-        ``None`` is also returned for an unmapped URL; use :meth:`is_mapped` to
-        tell the two apart.
+        Not the number of sidebar rows. A peer assignment is two rows under one
+        item id, and a run bounded at "10 items" is being asked for ten things
+        to sit through rather than ten lines in the sidebar.
+        """
+        return len({urls.item_id(path) or path for path in self._flat_paths})
+
+    def module_count(self):
+        """Returns how many modules the map holds."""
+        return len(self.course_map)
+
+    def awaiting_your_post(self, status):
+        """Returns the archived rows only the user can get marked complete.
+
+        The counterpart to hiding them from :meth:`unfinished_items`: a course
+        that stops early because of one of these should say which, rather than
+        leave the user reading "nothing left to watch" beside a sidebar that
+        still shows work.
+        """
+        rows = []
+        for lessons in self.course_map.values():
+            for lesson in lessons:
+                _title, label, href, _duration = lesson
+                if (
+                    label in progress.SELF_SUBMITTED_LABELS
+                    and status.get(urls.normalize_path(href)) is False
+                ):
+                    if self._archived_quietly(href):
+                        rows.append(lesson)
+        return rows
+
+    def _archived_quietly(self, href):
+        """``is_archived`` without letting a ledger problem decide the traversal."""
+        try:
+            return self.is_archived(href)
+        except Exception as exc:
+            log.debug("Archive check for %s failed: %s", href, exc)
+            return False
+
+    def unfinished_items(self, status, skip_labels=(), exclude=()):
+        """Returns the mapped rows the sidebar reports as unfinished, in course order.
+
+        ``status`` is the ``{path: completed}`` reading of the live sidebar.
+        Only rows it explicitly marks unfinished are returned: an unreadable row
+        says nothing about its state, and counting it as work would keep a
+        finished course from ever being reported as one.
+
+        ``skip_labels`` drops the row types the caller will not act on, which is
+        how a run learns that what is left is all work it does not do.
+
+        ``exclude`` drops individual items by URL. Not every item a run works on
+        ends up marked complete -- a discussion prompt is read and archived but
+        never posted to -- and one that does not is listed as work for as long
+        as the run lasts. Asked twice, the sidebar gives the same answer twice,
+        which is a loop rather than progress.
+
+        A :data:`~phantadex.progress.SELF_SUBMITTED_LABELS` row the ledger already holds is dropped
+        for the same reason, but across runs rather than within one: ``exclude``
+        is filled as a run works items, so a fresh run had forgotten and opened
+        the discussion again, every time, for as long as the course existed.
+        """
+        excluded = {urls.normalize_path(item) for item in exclude}
+        rows = []
+        for lessons in self.course_map.values():
+            for lesson in lessons:
+                title, label, href, _duration = lesson
+                if status.get(urls.normalize_path(href)) is not False:
+                    continue
+                if label in skip_labels:
+                    continue
+                if label in progress.SELF_SUBMITTED_LABELS and self._archived_quietly(href):
+                    continue
+                if any(urls.same_item(href, item) for item in excluded):
+                    continue
+                rows.append(lesson)
+        return rows
+
+    def next_actionable(self, status, current_url=None, skip_labels=(), exclude=()):
+        """Returns the row the run should go to next, or ``None`` when there is none.
+
+        Course order, counted from ``current_url``: the items ahead of it first,
+        then the ones behind. A run works forwards, but a course picked up
+        part-way through has unfinished items behind the item it is on, and
+        never going back would leave them undone for good.
+
+        Rows addressing ``current_url`` itself are never returned. "Next" cannot
+        be the item being left, and the sidebar takes a moment to record a
+        completion, so the item just finished is routinely still listed as work.
+        """
+        rows = self.unfinished_items(status, skip_labels=skip_labels, exclude=exclude)
+        if current_url is None:
+            return rows[0] if rows else None
+
+        positions = {}
+        for index, path in enumerate(self._flat_paths):
+            positions.setdefault(path, index)
+        matches = self._match_indices(current_url)
+        boundary = max(matches) if matches else -1
+
+        ahead, behind = [], []
+        for row in rows:
+            if urls.same_item(row[2], current_url):
+                continue
+            position = positions.get(urls.normalize_path(row[2]), -1)
+            (ahead if position > boundary else behind).append(row)
+        ordered = ahead + behind
+        return ordered[0] if ordered else None
+
+    def _match_indices(self, current_url):
+        """Returns every map position that addresses ``current_url``, in order.
+
+        Usually one. A peer assignment is two sidebar rows -- the submission and
+        the review of classmates' work -- served under one opaque item id, so
+        both rows answer to the same identity and both are returned.
         """
         normalized = urls.normalize_path(current_url)
-        for index, path in enumerate(self._flat_paths):
-            if urls.same_item(path, normalized):
-                if index + 1 < len(self._flat_paths):
-                    return urls.absolute_url(self._flat_paths[index + 1])
-                return None
-        log.debug("Current URL %s not found in course map", current_url)
+        return [
+            index for index, path in enumerate(self._flat_paths) if urls.same_item(path, normalized)
+        ]
+
+    def get_next_url(self, current_url):
+        """Returns the absolute URL of the next *different* mapped item.
+
+        ``None`` at the end of the course, and also for an unmapped URL; use
+        :meth:`is_mapped` to tell the two apart.
+
+        "Different" is what stops the run cycling. Where one item holds several
+        adjacent map rows, taking the row after the first match returns a URL
+        that is still the same item -- navigating to it is a no-op, the handler
+        advances again, and the run repeats that pair forever. A peer assignment
+        did exactly this at the end of a course. Every row belonging to the
+        current item is stepped over instead.
+        """
+        matches = self._match_indices(current_url)
+        if not matches:
+            log.debug("Current URL %s not found in course map", current_url)
+            return None
+        for index in range(max(matches) + 1, len(self._flat_paths)):
+            if not urls.same_item(self._flat_paths[index], current_url):
+                return urls.absolute_url(self._flat_paths[index])
         return None
 
     def get_previous_url(self, current_url):
-        """Returns the mapped item before ``current_url``, or ``None`` at the start."""
-        normalized = urls.normalize_path(current_url)
-        for index, path in enumerate(self._flat_paths):
-            if urls.same_item(path, normalized):
-                if index > 0:
-                    return urls.absolute_url(self._flat_paths[index - 1])
-                return None
-        log.debug("Current URL %s not found in course map", current_url)
+        """Returns the mapped item before ``current_url``, or ``None`` at the start.
+
+        Rows belonging to the current item are stepped over, for the reason
+        given on :meth:`get_next_url`: a retreat onto the item being retreated
+        from is not a retreat.
+        """
+        matches = self._match_indices(current_url)
+        if not matches:
+            log.debug("Current URL %s not found in course map", current_url)
+            return None
+        for index in range(min(matches) - 1, -1, -1):
+            if not urls.same_item(self._flat_paths[index], current_url):
+                return urls.absolute_url(self._flat_paths[index])
         return None
+
+    def module_for(self, current_url):
+        """Returns the name of the module holding ``current_url``, or ``""``.
+
+        The traversal limits count modules as the run meets them, so an item has
+        to be able to say which one it belongs to.
+        """
+        for module_name, lessons in self.course_map.items():
+            for _title, _item_type, url, _duration in lessons:
+                if urls.same_item(url, current_url):
+                    return module_name
+        return ""
 
 
 def _bounded_content(content_text, filename):

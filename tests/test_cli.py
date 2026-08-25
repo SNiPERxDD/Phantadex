@@ -3,6 +3,8 @@
 import importlib
 import importlib.util
 import io
+import logging
+import os
 import re
 import subprocess
 import sys
@@ -56,7 +58,9 @@ class FakeVideoPage:
                 "muted": False,
             }
         if "targetSeconds" in script:
-            self.seek_target = args[0]
+            # The script is handed ``[selector, targetSeconds]``: one argument,
+            # because that is all ``page.evaluate`` passes.
+            self.seek_target = args[0][1]
             self.current_time = self.seek_target
             return True
         return None
@@ -516,6 +520,83 @@ class VerbosityFlagTests(unittest.TestCase):
                 self.assertEqual(
                     config.settings_from_args(build().parse_args(["-v"])).log_level, "DEBUG"
                 )
+
+
+class RunScopeFlagTests(unittest.TestCase):
+    """``--modules N`` / ``--items N``: how much of a course one run covers."""
+
+    @staticmethod
+    def _settings(argv):
+        parser = config.add_automation_args(config.build_parser("watch"))
+        return config.settings_from_args(parser.parse_args(argv))
+
+    def test_the_default_is_the_whole_course(self):
+        settings = self._settings([])
+        self.assertIsNone(settings.module_limit)
+        self.assertIsNone(settings.item_limit)
+        self.assertIn("whole course", settings.describe())
+
+    def test_a_count_reaches_the_settings(self):
+        self.assertEqual(self._settings(["--modules", "2"]).module_limit, 2)
+        self.assertEqual(self._settings(["--items", "7"]).item_limit, 7)
+
+    def test_the_active_limit_is_named_in_the_settings_line(self):
+        self.assertIn("scope=2 modules", self._settings(["--modules", "2"]).describe())
+        self.assertIn("scope=7 items", self._settings(["--items", "7"]).describe())
+
+    def test_a_count_below_one_is_refused_at_the_command_line(self):
+        # A run asked for nothing would attach, map the course and stop without
+        # touching an item, which reads as a failure rather than as obedience.
+        for argv in (["--items", "0"], ["--modules", "-1"]):
+            with self.subTest(argv=argv), self.assertRaises(SystemExit):
+                with redirect_stderr(io.StringIO()):
+                    self._settings(argv)
+
+    def test_a_count_that_is_not_a_number_is_refused(self):
+        with self.assertRaises(SystemExit), redirect_stderr(io.StringIO()):
+            self._settings(["--items", "some"])
+
+    def test_the_two_limits_cannot_be_combined(self):
+        # They bound the same run in two ways; honouring the smaller one
+        # silently is worse than saying they conflict.
+        stderr = io.StringIO()
+        with self.assertRaises(SystemExit), redirect_stderr(stderr):
+            self._settings(["--modules", "2", "--items", "3"])
+        self.assertIn("not allowed with", stderr.getvalue())
+
+    def test_settings_built_by_hand_refuse_the_same_pair(self):
+        with self.assertRaises(ValueError):
+            config.Settings(module_limit=2, item_limit=3)
+
+
+class RunLogFlagTests(unittest.TestCase):
+    @staticmethod
+    def _settings(argv):
+        parser = config.add_automation_args(config.build_parser("watch"))
+        return config.settings_from_args(parser.parse_args(argv))
+
+    def test_a_run_log_is_written_by_default(self):
+        self.assertTrue(self._settings([]).run_log)
+
+    def test_the_flag_turns_it_off(self):
+        self.assertFalse(self._settings(["--no-run-log"]).run_log)
+
+    def test_the_suite_never_writes_a_run_log_where_a_person_keeps_theirs(self):
+        # The watch entry point opens a real run log, so an unredirected suite
+        # dropped its own output into the user's state directory.
+        self.assertTrue(logs.run_log_dir().startswith(os.environ["PHANTADEX_STATE_DIR"]))
+
+    def test_repeated_runs_leave_one_run_log_handler(self):
+        cli_module = importlib.import_module("phantadex.cli")
+        logger = logging.getLogger(logs.LOGGER_NAME)
+        self.addCleanup(logs.close_run_log)
+
+        with mock.patch.object(cli_module.watch.runner, "run"), capture_console():
+            cli_module.main(["watch"])
+            cli_module.main(["watch"])
+
+        installed = [h for h in logger.handlers if isinstance(h, logs.RunLogHandler)]
+        self.assertEqual(len(installed), 1)
 
 
 if __name__ == "__main__":
