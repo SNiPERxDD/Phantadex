@@ -79,34 +79,80 @@ Selectors learned by `pdex discover` live outside the package (§5), so an
 upgrade or a reinstall does not discard them.
 
 **Or hand the setup to a coding agent.** Paste the block below into Claude
-Code, Codex, Cursor, or any agent with a shell, and it has everything it needs
-to install the tool and leave a signed-in browser waiting:
+Code, Codex, Cursor, Antigravity, or any agent with a shell:
 
 ```text
-Install and set up Phantadex (https://github.com/SNiPERxDD/Phantadex), a CLI
-that drives an already-signed-in Chrome through Coursera coursework.
+Install and configure Phantadex ([https://github.com/SNiPERxDD/Phantadex](https://github.com/SNiPERxDD/Phantadex)), a CLI that connects to a user-controlled Chrome session for inspecting and navigating Coursera course content.
 
-1. Confirm Python 3.11 or newer is on PATH. Report the version you found.
-2. Install it with `pipx install phantadex`. If pipx is missing, install pipx
-   first (`python -m pip install --user pipx` then `python -m pipx ensurepath`),
-   and open a new shell so the PATH change takes effect. Fall back to
-   `python -m pip install --user phantadex` only if pipx cannot be installed.
-3. Verify with `pdex --version` and `pdex -h`. If `pdex` is not found, the
-   scripts directory is not on PATH -- say so and print the directory rather
-   than working around it with a full path.
-4. Do NOT run `playwright install`. Playwright is used here only as a DevTools
-   Protocol client; its bundled browsers are not needed.
-5. Run `pdex chrome`. It starts Google Chrome with its debugging port open on a
-   dedicated profile. If it reports the port is held by something that is not a
-   debug browser, set PHANTADEX_CDP_URL to http://localhost:9223 in my shell
-   profile and run `pdex chrome` again. Do not kill the process holding 9222
-   without asking me.
-6. Stop there and tell me to sign in to Coursera in the Chrome window it
-   opened, then open the course I want worked through.
+You may perform only the installation and configuration steps explicitly listed below. You may open a new shell, set only the documented `PHANTADEX_CDP_URL` environment variable in my shell profile when required, and launch Phantadex's dedicated Chrome profile.
 
-Do not sign in on my behalf, and do not enter any credentials anywhere. After I
-confirm I am signed in with a course open, run `pdex` to print the course tree
-so we can check the attachment works, and then stop and show me the output.
+If any required step reaches a hard stop, explain the cause and propose the smallest safe fix. Ask for my approval before performing any action not explicitly authorized below. If I do not approve, stop.
+
+Do not kill processes, use `sudo` or administrator privileges, install Python or Chrome, modify unrelated files or browser profiles, delete data, change security settings, or use an unlisted workaround without my explicit approval.
+
+1. Confirm that Python 3.11 or newer is available on `PATH` and report the version found.
+2. Install Phantadex with:
+
+   `pipx install phantadex`
+
+   If `pipx` is not installed, install it with:
+
+   `python -m pip install --user pipx`
+
+   followed by:
+
+   `python -m pipx ensurepath`
+
+   Then use a new shell so the updated `PATH` takes effect.
+
+   If `pipx` cannot be installed, fall back to:
+
+   `python -m pip install --user phantadex`
+3. Verify the installation with:
+
+   `pdex --version`
+
+   and:
+
+   `pdex -h`
+
+   If `pdex` is not found, report that the relevant Python scripts directory is not on `PATH` and print that directory. Do not work around the problem by invoking `pdex` through an absolute path.
+4. Do not run `playwright install`. In this setup, Playwright is used only as a Chrome DevTools Protocol client, so its bundled browsers are not required.
+5. Run:
+
+   `pdex chrome`
+
+   This should launch Google Chrome with remote debugging enabled using Phantadex's dedicated browser profile.
+
+   If Phantadex reports that port `9222` is occupied by something other than a compatible debug browser, do not terminate the process using that port. Instead, configure:
+
+   `PHANTADEX_CDP_URL=http://localhost:9223`
+
+   in my shell profile, start a new shell so the environment change takes effect, and run:
+
+   `pdex chrome`
+
+   again.
+6. Stop after Chrome launches. Tell me to sign in to Coursera myself in the Chrome window and navigate to the course I want to inspect.
+
+Do not sign in on my behalf, request, read, store, or enter credentials, complete quizzes or assignments, answer assessment questions, submit coursework, alter grades or progress, or otherwise perform graded academic work.
+
+After I explicitly confirm that I am signed in and have the desired course open, run:
+
+`pdex`
+
+only to display the course tree and verify that the browser connection is working.
+
+Then show me the resulting output and briefly explain, without running them, that:
+
+- `pdex` displays the course tree.
+- `pdex watch` traverses supported non-graded course content; describing this command does not authorize running it.
+- `pdex archive` archives supported course content; describing this command does not authorize running it.
+- `pdex stop` stops Phantadex processes; describing this command does not authorize running it.
+
+Do not run `pdex watch`, `pdex archive`, `pdex stop`, or any other additional command unless I explicitly request it in a later message.
+
+After showing the `pdex` output and the brief command descriptions, take no further action and stop.
 ```
 
 **From a clone (how to develop, and how to run an unreleased change):**
