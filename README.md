@@ -91,67 +91,21 @@ If any required step reaches a hard stop, explain the cause and propose the smal
 Do not kill processes, use `sudo` or administrator privileges, install Python or Chrome, modify unrelated files or browser profiles, delete data, change security settings, or use an unlisted workaround without my explicit approval.
 
 1. Confirm that Python 3.11 or newer is available on `PATH` and report the version found.
-2. Install Phantadex with:
-
-   `pipx install phantadex`
-
-   If `pipx` is not installed, install it with:
-
-   `python -m pip install --user pipx`
-
-   followed by:
-
-   `python -m pipx ensurepath`
-
-   Then use a new shell so the updated `PATH` takes effect.
-
-   If `pipx` cannot be installed, fall back to:
-
-   `python -m pip install --user phantadex`
-3. Verify the installation with:
-
-   `pdex --version`
-
-   and:
-
-   `pdex -h`
-
-   If `pdex` is not found, report that the relevant Python scripts directory is not on `PATH` and print that directory. Do not work around the problem by invoking `pdex` through an absolute path.
+2. Install Phantadex with `pipx install phantadex`. If `pipx` is not installed, install it with `python -m pip install --user pipx`, followed by `python -m pipx ensurepath`, then use a new shell so the updated `PATH` takes effect. If `pipx` cannot be installed, fall back to `python -m pip install --user phantadex`.
+3. Verify the installation with `pdex --version` and `pdex -h`. If `pdex` is not found, report that the relevant Python scripts directory is not on `PATH` and print that directory. Do not work around the problem by invoking `pdex` through an absolute path.
 4. Do not run `playwright install`. In this setup, Playwright is used only as a Chrome DevTools Protocol client, so its bundled browsers are not required.
-5. Run:
-
-   `pdex chrome`
-
-   This should launch Google Chrome with remote debugging enabled using Phantadex's dedicated browser profile.
-
-   If Phantadex reports that port `9222` is occupied by something other than a compatible debug browser, do not terminate the process using that port. Instead, configure:
-
-   `PHANTADEX_CDP_URL=http://localhost:9223`
-
-   in my shell profile, start a new shell so the environment change takes effect, and run:
-
-   `pdex chrome`
-
-   again.
+5. Run `pdex chrome`. This should launch Google Chrome with remote debugging enabled using Phantadex's dedicated browser profile. If Phantadex reports that port `9222` is occupied by something other than a compatible debug browser, do not terminate the process using that port. Instead, configure `PHANTADEX_CDP_URL=http://localhost:9223` in my shell profile, start a new shell so the environment change takes effect, and run `pdex chrome` again.
 6. Stop after Chrome launches. Tell me to sign in to Coursera myself in the Chrome window and navigate to the course I want to inspect.
 
 Do not sign in on my behalf, request, read, store, or enter credentials, complete quizzes or assignments, answer assessment questions, submit coursework, alter grades or progress, or otherwise perform graded academic work.
 
-After I explicitly confirm that I am signed in and have the desired course open, run:
-
-`pdex`
-
-only to display the course tree and verify that the browser connection is working.
-
-Then show me the resulting output and briefly explain, without running them, that:
-
+After I explicitly confirm that I am signed in and have the desired course open, run `pdex` only to display the course tree and verify that the browser connection is working. Then show me the resulting output and briefly explain, without running them, that:
 - `pdex` displays the course tree.
 - `pdex watch` traverses supported non-graded course content; describing this command does not authorize running it.
 - `pdex archive` archives supported course content; describing this command does not authorize running it.
 - `pdex stop` stops Phantadex processes; describing this command does not authorize running it.
 
 Do not run `pdex watch`, `pdex archive`, `pdex stop`, or any other additional command unless I explicitly request it in a later message.
-
 After showing the `pdex` output and the brief command descriptions, take no further action and stop.
 ```
 
