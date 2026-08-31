@@ -84,17 +84,19 @@ Code, Codex, Cursor, Antigravity, or any agent with a shell:
 ```text
 Install and configure Phantadex ([https://github.com/SNiPERxDD/Phantadex](https://github.com/SNiPERxDD/Phantadex)), a CLI that connects to a user-controlled Chrome session for inspecting and navigating Coursera course content.
 
-You may perform only the installation and configuration steps explicitly listed below. You may open a new shell, set only the documented `PHANTADEX_CDP_URL` environment variable in my shell profile when required, and launch Phantadex's dedicated Chrome profile.
+You may perform only the installation, configuration, launch, and read-only diagnostic steps explicitly required below. Read-only diagnostic commands may be used only to check versions, PATH resolution, port availability, and the relevant Python scripts directory. You may open a new shell, set only the documented `PHANTADEX_CDP_URL` environment variable in my shell profile when required, and launch Phantadex's dedicated Chrome profile.
 
 If any required step reaches a hard stop, explain the cause and propose the smallest safe fix. Ask for my approval before performing any action not explicitly authorized below. If I do not approve, stop.
+
+Do not treat a failed command as permission to try alternative flags, package managers, installation methods, paths, ports, or configuration changes unless that alternative is explicitly listed below.
 
 Do not kill processes, use `sudo` or administrator privileges, install Python or Chrome, modify unrelated files or browser profiles, delete data, change security settings, or use an unlisted workaround without my explicit approval.
 
 1. Confirm that Python 3.11 or newer is available on `PATH` and report the version found.
 2. Install Phantadex with `pipx install phantadex`. If `pipx` is not installed, install it with `python -m pip install --user pipx`, followed by `python -m pipx ensurepath`, then use a new shell so the updated `PATH` takes effect. If `pipx` cannot be installed, fall back to `python -m pip install --user phantadex`.
-3. Verify the installation with `pdex --version` and `pdex -h`. If `pdex` is not found, report that the relevant Python scripts directory is not on `PATH` and print that directory. Do not work around the problem by invoking `pdex` through an absolute path.
+3. Verify the installation with `pdex --version` and `pdex -h`. If `pdex` is not found, report that the relevant Python scripts directory is not on `PATH` and use a read-only diagnostic command to determine and print that directory. Do not work around the problem by invoking `pdex` through an absolute path.
 4. Do not run `playwright install`. In this setup, Playwright is used only as a Chrome DevTools Protocol client, so its bundled browsers are not required.
-5. Run `pdex chrome`. This should launch Google Chrome with remote debugging enabled using Phantadex's dedicated browser profile. If Phantadex reports that port `9222` is occupied by something other than a compatible debug browser, do not terminate the process using that port. Instead, configure `PHANTADEX_CDP_URL=http://localhost:9223` in my shell profile, start a new shell so the environment change takes effect, and run `pdex chrome` again.
+5. Run `pdex chrome`. This should launch Google Chrome with remote debugging enabled using Phantadex's dedicated browser profile. If Phantadex reports that port `9222` is occupied by something other than a compatible debug browser, do not terminate the process using that port. Instead, add or update only the `PHANTADEX_CDP_URL` setting in the appropriate shell profile so its value is `http://localhost:9223`. Do not alter any other profile entries. Start a new shell so the environment change takes effect, and run `pdex chrome` again.
 6. Stop after Chrome launches. Tell me to sign in to Coursera myself in the Chrome window and navigate to the course I want to inspect.
 
 Do not sign in on my behalf, request, read, store, or enter credentials, complete quizzes or assignments, answer assessment questions, submit coursework, alter grades or progress, or otherwise perform graded academic work.
